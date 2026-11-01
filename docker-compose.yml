@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:17.11
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kkd}
+      POSTGRES_USER: ${POSTGRES_USER:-kkd}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kkd_local_only}
+    ports:
+      - "127.0.0.1:${DB_PORT:-15432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LIQUIBASE_COMMAND_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-kkd}
+      LIQUIBASE_COMMAND_USERNAME: ${POSTGRES_USER:-kkd}
+      LIQUIBASE_COMMAND_PASSWORD: ${POSTGRES_PASSWORD:-kkd_local_only}
+      LIQUIBASE_COMMAND_CHANGELOG_FILE: changelog/db.changelog-master.yaml
+    command: ["update"]
+
+  app:
+    build:
+      context: .
+      target: runtime
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-kkd}
+      DB_USER: ${POSTGRES_USER:-kkd}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-kkd_local_only}
+
+volumes:
+  pgdata:

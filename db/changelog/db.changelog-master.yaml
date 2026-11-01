@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: 000-tag-empty
+      author: kkd
+      changes:
+        - tagDatabase:
+            tag: v0-empty
+  - include:
+      file: 000-probe.sql
+      relativeToChangelogFile: true
