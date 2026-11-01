@@ -2,10 +2,10 @@ package ru.kkd.domain.rules;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import ru.kkd.domain.TestData;
 import ru.kkd.domain.model.GoalLevel;
 import ru.kkd.domain.model.GoalRow;
 import ru.kkd.domain.model.Issue;
@@ -53,15 +53,14 @@ class GoalNoKrRuleTest {
     }
 
     private static GoalRow goal(String id) {
-        return new GoalRow(id, "Цель", "CIB-NORTH", GoalLevel.EMPLOYEE, "Михайлов Н. Е.", "G-01", "active", null);
+        return TestData.activeGoal(id, "CIB-NORTH", GoalLevel.EMPLOYEE, "G-01");
     }
 
     private static KeyResultRow keyResult(String id, String goalId) {
-        return new KeyResultRow(
-                id, goalId, "КР", "шт.", BigDecimal.TEN, BigDecimal.ONE, new BigDecimal("100.00"), SNAPSHOT_DATE);
+        return TestData.keyResult(id, goalId, "100.00", SNAPSHOT_DATE);
     }
 
     private static Issue expectedIssue(String goalId) {
-        return new Issue(RuleCode.GOAL_NO_KR, goalId, "goal", SEVERITY, goalId, "CIB-NORTH", DETAILS);
+        return TestData.goalIssue(RuleCode.GOAL_NO_KR, goalId, "CIB-NORTH", SEVERITY, DETAILS);
     }
 }

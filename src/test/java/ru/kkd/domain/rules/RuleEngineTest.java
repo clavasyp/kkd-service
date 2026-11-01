@@ -3,8 +3,8 @@ package ru.kkd.domain.rules;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static ru.kkd.domain.TestData.keyResult;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import ru.kkd.domain.TestData;
 import ru.kkd.domain.model.GoalLevel;
 import ru.kkd.domain.model.GoalRow;
 import ru.kkd.domain.model.Issue;
@@ -176,11 +177,6 @@ class RuleEngineTest {
     }
 
     private static GoalRow goal(String id, GoalLevel level, String parentGoalId, String status) {
-        return new GoalRow(id, "Цель", "CIB-NORTH", level, "Иванов И. И.", parentGoalId, status, null);
-    }
-
-    private static KeyResultRow keyResult(String id, String goalId, String weight, LocalDate factUpdatedOn) {
-        return new KeyResultRow(
-                id, goalId, "КР", "шт.", BigDecimal.TEN, BigDecimal.ONE, new BigDecimal(weight), factUpdatedOn);
+        return TestData.goal(id, "CIB-NORTH", level, parentGoalId, status);
     }
 }

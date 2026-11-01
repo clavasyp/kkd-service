@@ -12,4 +12,10 @@ public record GoalRow(
         String parentGoalId,
         String status,
         LocalDate dueDate) {
+
+    private static final String ACTIVE_STATUS = "active";
+
+    public boolean isActive() {
+        return ACTIVE_STATUS.equals(status);
+    }
 }

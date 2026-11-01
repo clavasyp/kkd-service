@@ -2,10 +2,10 @@ package ru.kkd.domain.rules;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import ru.kkd.domain.TestData;
 import ru.kkd.domain.model.GoalLevel;
 import ru.kkd.domain.model.GoalRow;
 import ru.kkd.domain.model.Issue;
@@ -21,8 +21,7 @@ class KrStaleProgressRuleTest {
     // В справочнике у правила minor. Другая важность проверяет, что правило берёт переданную.
     private static final Severity SEVERITY = Severity.CRITICAL;
 
-    private static final GoalRow GOAL = new GoalRow(
-            "G-11", "Цель", "CIB-NORTH", GoalLevel.EMPLOYEE, "Морозов С. П.", "G-06", "active", null);
+    private static final GoalRow GOAL = TestData.activeGoal("G-11", "CIB-NORTH", GoalLevel.EMPLOYEE, "G-06");
 
     private final KrStaleProgressRule rule = new KrStaleProgressRule();
 
@@ -82,12 +81,11 @@ class KrStaleProgressRuleTest {
     }
 
     private static KeyResultRow keyResult(String id, LocalDate factUpdatedOn) {
-        return new KeyResultRow(
-                id, GOAL.id(), "КР", "шт.", BigDecimal.TEN, BigDecimal.ONE, new BigDecimal("100.00"), factUpdatedOn);
+        return TestData.keyResult(id, GOAL.id(), "100.00", factUpdatedOn);
     }
 
     private static Issue expectedIssue(String keyResultId, String details) {
-        return new Issue(
-                RuleCode.KR_STALE_PROGRESS, keyResultId, "key_result", SEVERITY, GOAL.id(), GOAL.unitId(), details);
+        return TestData.keyResultIssue(
+                RuleCode.KR_STALE_PROGRESS, keyResultId, GOAL.id(), GOAL.unitId(), SEVERITY, details);
     }
 }

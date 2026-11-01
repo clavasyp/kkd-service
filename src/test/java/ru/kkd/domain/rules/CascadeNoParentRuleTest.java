@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import ru.kkd.domain.TestData;
 import ru.kkd.domain.model.GoalLevel;
 import ru.kkd.domain.model.GoalRow;
 import ru.kkd.domain.model.Issue;
@@ -65,16 +66,14 @@ class CascadeNoParentRuleTest {
 
     @Test
     void closedParentDoesNotFire() {
-        GoalRow closedParent = new GoalRow(
-                "G-15", "Цель", UNIT_ID, GoalLevel.UNIT, "Новиков А. В.", null, "closed", null);
+        GoalRow closedParent = TestData.goal("G-15", UNIT_ID, GoalLevel.UNIT, null, "closed");
 
         assertThat(check(goal("G-21", GoalLevel.EMPLOYEE, "G-15"), closedParent)).isEmpty();
     }
 
     @Test
     void parentFromAnotherUnitBranchDoesNotFire() {
-        GoalRow parentInNorth = new GoalRow(
-                "G-05", "Цель", "CIB-NORTH", GoalLevel.UNIT, "Смирнов Д. А.", "G-01", "active", null);
+        GoalRow parentInNorth = TestData.activeGoal("G-05", "CIB-NORTH", GoalLevel.UNIT, "G-01");
 
         assertThat(check(goal("G-18", GoalLevel.EMPLOYEE, "G-05"), parentInNorth)).isEmpty();
     }
@@ -110,10 +109,10 @@ class CascadeNoParentRuleTest {
     }
 
     private static GoalRow goal(String id, GoalLevel level, String parentGoalId) {
-        return new GoalRow(id, "Цель", UNIT_ID, level, "Орлова В. П.", parentGoalId, "active", null);
+        return TestData.activeGoal(id, UNIT_ID, level, parentGoalId);
     }
 
     private static Issue expectedIssue(String goalId, String details) {
-        return new Issue(RuleCode.CASCADE_NO_PARENT, goalId, "goal", SEVERITY, goalId, UNIT_ID, details);
+        return TestData.goalIssue(RuleCode.CASCADE_NO_PARENT, goalId, UNIT_ID, SEVERITY, details);
     }
 }

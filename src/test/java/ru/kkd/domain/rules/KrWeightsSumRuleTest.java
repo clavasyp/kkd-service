@@ -2,11 +2,11 @@ package ru.kkd.domain.rules;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import ru.kkd.domain.TestData;
 import ru.kkd.domain.model.GoalLevel;
 import ru.kkd.domain.model.GoalRow;
 import ru.kkd.domain.model.Issue;
@@ -143,16 +143,14 @@ class KrWeightsSumRuleTest {
     }
 
     private static GoalRow goal(String id) {
-        return new GoalRow(id, "Цель", "CIB-NORTH", GoalLevel.UNIT, "Васильев К. М.", "G-02", "active", null);
+        return TestData.activeGoal(id, "CIB-NORTH", GoalLevel.UNIT, "G-02");
     }
 
     private static KeyResultRow keyResult(String id, String goalId, String weight) {
-        return new KeyResultRow(
-                id, goalId, "КР", "шт.", BigDecimal.TEN, BigDecimal.ONE,
-                weight == null ? null : new BigDecimal(weight), SNAPSHOT_DATE);
+        return TestData.keyResult(id, goalId, weight, SNAPSHOT_DATE);
     }
 
     private static Issue expectedIssue(String details) {
-        return new Issue(RuleCode.KR_WEIGHTS_SUM, GOAL.id(), "goal", SEVERITY, GOAL.id(), GOAL.unitId(), details);
+        return TestData.goalIssue(RuleCode.KR_WEIGHTS_SUM, GOAL.id(), GOAL.unitId(), SEVERITY, details);
     }
 }

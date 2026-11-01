@@ -9,8 +9,6 @@ import ru.kkd.domain.model.Snapshot;
 
 public class RuleEngine {
 
-    private static final String ACTIVE_STATUS = "active";
-
     private static final List<Rule> RULES = List.of(
             new GoalNoKrRule(),
             new KrWeightsSumRule(),
@@ -25,7 +23,7 @@ public class RuleEngine {
 
     public List<Issue> check(Snapshot snapshot, RuleCatalog catalog) {
         List<GoalRow> activeGoals = snapshot.goals().stream()
-                .filter(goal -> ACTIVE_STATUS.equals(goal.status()))
+                .filter(GoalRow::isActive)
                 .toList();
 
         List<Issue> issues = new ArrayList<>();
