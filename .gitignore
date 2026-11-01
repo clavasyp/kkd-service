@@ -3,7 +3,6 @@ target/
 .idea/
 *.iml
 before*.json
-probe*.json
 
 # Рабочие материалы кандидата, в решение не входят
 research/
