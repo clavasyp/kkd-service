@@ -42,6 +42,7 @@ services:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-kkd}
       DB_USER: ${POSTGRES_USER:-kkd}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-kkd_local_only}
+      KKD_RUN_POLL_MS: ${KKD_RUN_POLL_MS:-2000}
 
 volumes:
   pgdata:

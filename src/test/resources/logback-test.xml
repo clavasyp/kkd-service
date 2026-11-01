@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Тесты нарочно вызывают сбои, и их стеки в консоли сборки только мешают.
+         Тесты журнала подключают ListAppender прямо к логгеру, поэтому события до них доходят. -->
+    <logger name="ru.kkd" additivity="false"/>
+
+    <!-- Настоящий TransactionTemplate в тестах с падающим откатом пишет об этом сам. -->
+    <logger name="org.springframework.transaction.support.TransactionTemplate" level="OFF"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>
