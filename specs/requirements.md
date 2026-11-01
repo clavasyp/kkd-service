@@ -264,7 +264,7 @@ grep -rnE 'LocalDate\.now|@Valid|@Validated|jakarta\.validation|jakarta\.persist
 grep -n 'liquibase-core' pom.xml
 ```
 
-Ожидается: все команды ничего не находят. В `ru/kkd/domain/rules` лежат `RuleEngine`, `Rule` и четыре класса правил. *Закрывает:* FR-9, FR-17, NFR-4, NFR-5, NFR-6, NFR-7.
+Ожидается: все команды ничего не находят. В `ru/kkd/domain/rules` лежат `RuleEngine`, `RuleCatalog`, `Rule` и четыре класса правил. *Закрывает:* FR-9, FR-17, NFR-4, NFR-5, NFR-6, NFR-7.
 
 **AC-18. Стек, настройка, окончания строк.**
 
