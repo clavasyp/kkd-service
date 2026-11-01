@@ -2,7 +2,7 @@
 
 Сервис на Java проверяет цели сотрудников и ключевые результаты по правилам, хранит результаты в PostgreSQL и отдаёт их через REST API.
 
-> **Статус: в работе.** Сейчас здесь схема БД и стартовые данные с откатом, компонент правил и расчёт метрик, дельты и сводки в `ru.kkd.domain` с тестами. Сервис сам считает прогоны и отдаёт `GET /api/runs`. Методов `GET /api/kkd/summary` и `GET /api/kkd/issues` ещё нет. Между откатом и накатом `GET /api/runs` пока отвечает 500, ответ 503 появится позже.
+> **Статус: в работе.** Сейчас здесь схема БД и стартовые данные с откатом, компонент правил и расчёт метрик, дельты и сводки в `ru.kkd.domain` с тестами. Сервис сам считает прогоны и отдаёт `GET /api/runs`, `GET /api/kkd/summary` и `GET /api/kkd/issues`, ошибки приходят в едином формате. Между откатом и накатом все три метода на запрос с корректными параметрами отвечают 503 `DB_NOT_READY`.
 
 ## Что нужно
 
@@ -49,7 +49,7 @@ docker build --target test --progress=plain .
 B=http://localhost:${APP_PORT:-8080}
 
 # Ждём, пока сервис посчитает оба прогона: 60 попыток, затем сообщение и код ошибки
-wait_runs() { for i in $(seq 1 60); do curl -sf "$B/api/runs" | grep -q '"id":"RUN-002","status":"completed"' && return 0; sleep 1; done; echo "не дождались RUN-002"; return 1; }
+wait_runs() { for i in $(seq 1 60); do curl -sf --max-time 5 "$B/api/runs" | grep -q '"id":"RUN-002","status":"completed"' && return 0; sleep 1; done; echo "не дождались RUN-002"; return 1; }
 
 # 1. Накат выполняется при запуске проекта
 docker compose up -d --build
@@ -59,6 +59,8 @@ wait_runs
 docker compose run --rm migrate rollback --tag=v0-empty
 docker compose exec -T db psql -U kkd -d kkd -c "\dt"
 # остались только databasechangelog и databasechangeloglock
+curl -si "$B/api/runs"
+# HTTP 503 и {"error":{"code":"DB_NOT_READY",...}}
 
 # 3. Повторный накат, перезапускать сервис не нужно
 docker compose run --rm migrate update
@@ -75,7 +77,7 @@ docker compose exec -T db psql -U kkd -d kkd -c "\dt"
 
 ## Контрольные числа стартовых данных
 
-Это ожидаемый результат после реализации: числа посчитаны вручную и пересчитаны отдельной программой. Сервис уже считает прогоны, но через API пока видно только число проблем всего прогона: `totals.issues_total` в `GET /api/runs`. Остальные числа появятся вместе с `GET /api/kkd/summary` и `GET /api/kkd/issues`. Состав данных описан в [specs/design.md](specs/design.md). Если API даст другое, ошибка в коде или в данных, а ожидание правится только после разбора.
+Это ожидаемый результат: числа посчитаны вручную и пересчитаны отдельной программой, через API их отдают `GET /api/runs`, `GET /api/kkd/summary` и `GET /api/kkd/issues`. Состав данных описан в [specs/design.md](specs/design.md). Если API даст другое, ошибка в коде или в данных, а ожидание правится только после разбора.
 
 Подразделения: `HQ-CIB` «Департамент корпоративного бизнеса», дочерние `CIB-NORTH` и `CIB-SOUTH`. Прогоны: `RUN-001` на 2026-10-19, `RUN-002` на 2026-10-26.
 

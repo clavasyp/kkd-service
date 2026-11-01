@@ -20,6 +20,12 @@ public class RunRepository {
             FROM kkd_run
             """;
 
+    private static final String FIND_BY_ID = """
+            SELECT id, snapshot_date, status, compared_to_run_id, error
+            FROM kkd_run
+            WHERE id = ?
+            """;
+
     private static final String FIND_NEXT_RUNNING = """
             SELECT id, snapshot_date, status, compared_to_run_id, error
             FROM kkd_run
@@ -57,6 +63,10 @@ public class RunRepository {
 
     public List<Run> findAll() {
         return jdbc.query(FIND_ALL, RunRepository::mapRun);
+    }
+
+    public Optional<Run> findById(String id) {
+        return jdbc.query(FIND_BY_ID, RunRepository::mapRun, id).stream().findFirst();
     }
 
     /** Самый ранний прогон running по (snapshot_date, id). */

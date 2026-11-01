@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import ru.kkd.domain.delta.BaseRunSelector;
 import ru.kkd.domain.rules.RuleEngine;
+import ru.kkd.domain.summary.SummaryAssembler;
 
 /** Домен не знает о Spring, поэтому его объекты собираются здесь. */
 @Configuration
@@ -17,5 +18,10 @@ public class DomainConfig {
     @Bean
     public BaseRunSelector baseRunSelector() {
         return new BaseRunSelector();
+    }
+
+    @Bean
+    public SummaryAssembler summaryAssembler() {
+        return new SummaryAssembler();
     }
 }

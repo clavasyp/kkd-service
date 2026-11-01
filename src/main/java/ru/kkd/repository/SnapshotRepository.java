@@ -3,7 +3,9 @@ package ru.kkd.repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import ru.kkd.domain.model.EnumText;
@@ -42,6 +44,12 @@ public class SnapshotRepository {
             WHERE run_id = ?
             """;
 
+    private static final String FIND_GOAL_TITLES = """
+            SELECT goal_id, title
+            FROM goal_snapshot
+            WHERE run_id = ?
+            """;
+
     private final JdbcTemplate jdbc;
 
     public SnapshotRepository(JdbcTemplate jdbc) {
@@ -62,6 +70,15 @@ public class SnapshotRepository {
         List<GoalRow> goals = jdbc.query(LOAD_GOALS, SnapshotRepository::mapGoal, runId);
         List<KeyResultRow> keyResults = jdbc.query(LOAD_KEY_RESULTS, SnapshotRepository::mapKeyResult, runId);
         return new Snapshot(snapshotDate, goals, keyResults);
+    }
+
+    /** Цель → её название на дату прогона. */
+    public Map<String, String> findGoalTitles(String runId) {
+        Map<String, String> titles = new HashMap<>();
+        jdbc.query(FIND_GOAL_TITLES, rs -> {
+            titles.put(rs.getString("goal_id"), rs.getString("title"));
+        }, runId);
+        return titles;
     }
 
     private static GoalRow mapGoal(ResultSet rs, int rowNum) throws SQLException {

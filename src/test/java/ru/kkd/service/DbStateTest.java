@@ -43,6 +43,11 @@ class DbStateTest {
     }
 
     @Test
+    void deadlockMeansNotReady() {
+        assertThat(DbState.isNotReady(new SQLException("deadlock detected", "40P01"))).isTrue();
+    }
+
+    @Test
     void nullIsNotNotReady() {
         assertThat(DbState.isNotReady(null)).isFalse();
     }

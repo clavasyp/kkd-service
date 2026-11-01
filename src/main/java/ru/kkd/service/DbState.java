@@ -10,10 +10,11 @@ import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.TransactionSystemException;
 
-/** Признак неготовой базы: таблицы нет или нет связи. Раздел 6.3 design.md. */
+/** Признак неготовой базы: таблицы нет, нет связи или взаимная блокировка. Раздел 6.3 design.md. */
 public final class DbState {
 
     private static final String UNDEFINED_TABLE = "42P01";
+    private static final String DEADLOCK = "40P01";
     private static final String CONNECTION_EXCEPTION_CLASS = "08";
     private static final Set<String> SERVER_STOPPING = Set.of("57P01", "57P02", "57P03");
 
@@ -44,6 +45,7 @@ public final class DbState {
     private static boolean signalsNotReady(String sqlState) {
         return sqlState != null
                 && (sqlState.equals(UNDEFINED_TABLE)
+                        || sqlState.equals(DEADLOCK)
                         || sqlState.startsWith(CONNECTION_EXCEPTION_CLASS)
                         || SERVER_STOPPING.contains(sqlState));
     }

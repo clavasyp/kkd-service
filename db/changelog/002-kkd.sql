@@ -42,4 +42,5 @@ CREATE TABLE kkd_issue (
     details     TEXT NOT NULL,
     PRIMARY KEY (run_id, rule_code, object_id)
 );
+--rollback LOCK TABLE kkd_run IN ACCESS EXCLUSIVE MODE;
 --rollback DROP TABLE kkd_issue;

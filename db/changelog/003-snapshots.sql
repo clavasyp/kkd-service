@@ -13,6 +13,7 @@ CREATE TABLE goal_snapshot (
     due_date       DATE,
     PRIMARY KEY (run_id, goal_id)
 );
+--rollback LOCK TABLE kkd_run IN ACCESS EXCLUSIVE MODE;
 --rollback DROP TABLE goal_snapshot;
 
 --changeset kkd:009-kr-snapshot
@@ -29,4 +30,5 @@ CREATE TABLE key_result_snapshot (
     PRIMARY KEY (run_id, kr_id),
     FOREIGN KEY (run_id, goal_id) REFERENCES goal_snapshot (run_id, goal_id)
 );
+--rollback LOCK TABLE kkd_run IN ACCESS EXCLUSIVE MODE;
 --rollback DROP TABLE key_result_snapshot;

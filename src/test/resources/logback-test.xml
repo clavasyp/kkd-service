@@ -13,6 +13,9 @@
     <!-- Настоящий TransactionTemplate в тестах с падающим откатом пишет об этом сам. -->
     <logger name="org.springframework.transaction.support.TransactionTemplate" level="OFF"/>
 
+    <!-- Тесты 405 нарочно шлют неподдерживаемый метод, и Spring пишет WARN на каждый такой запрос. -->
+    <logger name="org.springframework.web.servlet.PageNotFound" level="OFF"/>
+
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
     </root>
