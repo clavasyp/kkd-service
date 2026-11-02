@@ -3,6 +3,7 @@ package ru.kkd.repository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,10 +45,11 @@ public class SnapshotRepository {
             WHERE run_id = ?
             """;
 
+    // Цели одним параметром-массивом, как ветка в IssueRepository.
     private static final String FIND_GOAL_TITLES = """
             SELECT goal_id, title
             FROM goal_snapshot
-            WHERE run_id = ?
+            WHERE run_id = ? AND goal_id = ANY(CAST(? AS text[]))
             """;
 
     private final JdbcTemplate jdbc;
@@ -67,17 +69,25 @@ public class SnapshotRepository {
     }
 
     public Snapshot load(String runId, LocalDate snapshotDate) {
-        List<GoalRow> goals = jdbc.query(LOAD_GOALS, SnapshotRepository::mapGoal, runId);
+        List<GoalRow> goals = loadGoals(runId);
         List<KeyResultRow> keyResults = jdbc.query(LOAD_KEY_RESULTS, SnapshotRepository::mapKeyResult, runId);
         return new Snapshot(snapshotDate, goals, keyResults);
     }
 
-    /** Цель → её название на дату прогона. */
-    public Map<String, String> findGoalTitles(String runId) {
+    /** Только цели снимка: сводке КР не нужны. */
+    public List<GoalRow> loadGoals(String runId) {
+        return jdbc.query(LOAD_GOALS, SnapshotRepository::mapGoal, runId);
+    }
+
+    /** Цель → её название на дату прогона, только для указанных целей. */
+    public Map<String, String> findGoalTitles(String runId, Collection<String> goalIds) {
         Map<String, String> titles = new HashMap<>();
+        if (goalIds.isEmpty()) {
+            return titles;
+        }
         jdbc.query(FIND_GOAL_TITLES, rs -> {
             titles.put(rs.getString("goal_id"), rs.getString("title"));
-        }, runId);
+        }, runId, goalIds.toArray(String[]::new));
         return titles;
     }
 

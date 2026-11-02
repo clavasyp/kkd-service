@@ -26,6 +26,7 @@ import static ru.kkd.domain.TestData.keyResult;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
 import ch.qos.logback.core.read.ListAppender;
 import java.sql.SQLException;
 import java.sql.SQLTransientConnectionException;
@@ -35,6 +36,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Test;
@@ -118,6 +120,8 @@ class RunProcessorTest {
 
     // Вызовы и границы транзакций по порядку, для тестов раздела «Транзакции».
     private final List<String> events = new ArrayList<>();
+    private Runnable detachLog = () -> {
+    };
 
     @BeforeEach
     void snapshotExistsAndThisIsTheOnlyRun() {
@@ -125,6 +129,14 @@ class RunProcessorTest {
         when(snapshots.exists(RUN_ID)).thenReturn(true);
         when(snapshots.load(RUN_ID, SNAPSHOT_DATE)).thenReturn(SNAPSHOT);
         when(rules.loadCatalog()).thenReturn(CATALOG);
+        // Строка running на месте: запись статуса меняет её.
+        when(runs.markCompleted(any(), any())).thenReturn(true);
+        when(runs.markFailed(any(), any())).thenReturn(true);
+    }
+
+    @AfterEach
+    void detachRecordedLog() {
+        detachLog.run();
     }
 
     // Успех
@@ -416,6 +428,52 @@ class RunProcessorTest {
     }
 
     @Test
+    void successIsLoggedOnlyAfterCommit() {
+        recordCalls();
+        recordLog();
+
+        processorWith(new RecordingTransactions()).process(RUN);
+
+        assertThat(events).containsExactly(
+                "begin", "load", "saveAll", "markCompleted", "commit", "log INFO: Прогон RUN-002: проблем 2, сравнения нет");
+    }
+
+    @Test
+    void runThatIsNoLongerRunningKeepsNoIssuesAndGetsFailed() {
+        recordCalls();
+        recordLog();
+        // Строку прогона успели поменять: UPDATE ... WHERE status = 'running' не нашёл её.
+        doAnswer(record("markCompleted", false)).when(runs).markCompleted(any(), any());
+
+        processorWith(new RecordingTransactions()).process(RUN);
+
+        assertThat(events).containsSubsequence("begin", "saveAll", "markCompleted", "rollback", "begin", "markFailed", "commit");
+        assertThat(events).noneMatch(event -> event.startsWith("log INFO"));
+        verify(runs).markFailed(RUN_ID, RunProcessor.GENERAL_ERROR);
+    }
+
+    @Test
+    void runWhoseStatusCannotBeWrittenEndsTickInsteadOfBeingTakenAgainAtOnce() {
+        // Например, запись в kkd_run подавлена триггером: строка остаётся running, и такт без исключения брал бы её снова.
+        when(runs.markCompleted(any(), any())).thenReturn(false);
+        when(runs.markFailed(any(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> processor.process(RUN))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(RUN_ID);
+    }
+
+    @Test
+    void failedThatFindsNoRunningRowGoesUp() {
+        doThrow(new IllegalStateException(EXCEPTION_TEXT)).when(engine).check(any(), any());
+        when(runs.markFailed(any(), any())).thenReturn(false);
+
+        assertThatThrownBy(() -> processor.process(RUN))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(RUN_ID);
+    }
+
+    @Test
     void notReadyDatabaseRollsBackAndDoesNotWriteFailed() {
         RuntimeException tableMissing = sqlError("42P01");
         recordCalls();
@@ -605,15 +663,33 @@ class RunProcessorTest {
             return SNAPSHOT;
         }).when(snapshots).load(RUN_ID, SNAPSHOT_DATE);
         doAnswer(record("saveAll")).when(issues).saveAll(eq(RUN_ID), any());
-        doAnswer(record("markCompleted")).when(runs).markCompleted(any(), any());
-        doAnswer(record("markFailed")).when(runs).markFailed(any(), any());
+        doAnswer(record("markCompleted", true)).when(runs).markCompleted(any(), any());
+        doAnswer(record("markFailed", true)).when(runs).markFailed(any(), any());
     }
 
     private Answer<Object> record(String event) {
+        return record(event, null);
+    }
+
+    private Answer<Object> record(String event, Object result) {
         return call -> {
             events.add(event);
-            return null;
+            return result;
         };
+    }
+
+    /** Строки журнала RunProcessor идут в тот же журнал событий, что вызовы и границы транзакций. */
+    private void recordLog() {
+        Logger logger = (Logger) LoggerFactory.getLogger(RunProcessor.class);
+        AppenderBase<ILoggingEvent> appender = new AppenderBase<>() {
+            @Override
+            protected void append(ILoggingEvent event) {
+                events.add("log " + event.getLevel() + ": " + event.getFormattedMessage());
+            }
+        };
+        appender.start();
+        logger.addAppender(appender);
+        detachLog = () -> logger.detachAppender(appender);
     }
 
     private static Run completed(String id, LocalDate snapshotDate) {

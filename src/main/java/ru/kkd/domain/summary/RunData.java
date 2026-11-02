@@ -1,10 +1,10 @@
 package ru.kkd.domain.summary;
 
 import java.util.List;
+import ru.kkd.domain.model.GoalRow;
 import ru.kkd.domain.model.Issue;
 import ru.kkd.domain.model.Run;
-import ru.kkd.domain.model.Snapshot;
 
-/** Прогон с его снимком и всеми его проблемами, а не только проблемами ветки. */
-public record RunData(Run run, Snapshot snapshot, List<Issue> issues) {
+/** Прогон с целями его снимка и всеми его проблемами, а не только проблемами ветки. КР сводке не нужны. */
+public record RunData(Run run, List<GoalRow> goals, List<Issue> issues) {
 }

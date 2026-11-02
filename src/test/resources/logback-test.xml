@@ -6,9 +6,19 @@
         </encoder>
     </appender>
 
-    <!-- Тесты нарочно вызывают сбои, и их стеки в консоли сборки только мешают.
+    <!-- Журнал сервиса виден, чтобы при падении теста было видно, что писал сервис. Тесты нарочно вызывают сбои,
+         поэтому исключение выводится без кадров стека: строка с его классом и текстом и строка Caused by на каждую причину.
+         Полные стеки только мешали бы в консоли.
          Тесты журнала подключают ListAppender прямо к логгеру, поэтому события до них доходят. -->
-    <logger name="ru.kkd" additivity="false"/>
+    <appender name="SERVICE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n%ex{0}</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="ru.kkd" additivity="false">
+        <appender-ref ref="SERVICE"/>
+    </logger>
 
     <!-- Настоящий TransactionTemplate в тестах с падающим откатом пишет об этом сам. -->
     <logger name="org.springframework.transaction.support.TransactionTemplate" level="OFF"/>

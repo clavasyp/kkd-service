@@ -21,14 +21,13 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.TransactionDefinition;
 import ru.kkd.domain.delta.DeltaCounts;
 import ru.kkd.domain.model.GoalLevel;
+import ru.kkd.domain.model.GoalRow;
 import ru.kkd.domain.model.Issue;
 import ru.kkd.domain.model.Run;
 import ru.kkd.domain.model.RunStatus;
-import ru.kkd.domain.model.Snapshot;
 import ru.kkd.domain.model.Unit;
 import ru.kkd.domain.org.UnitTree;
 import ru.kkd.domain.summary.RunData;
@@ -142,7 +141,7 @@ class SummaryServiceTest {
     @Test
     void withoutComparedToRunIdBaseIsNull() {
         givenRun(FIRST);
-        givenRunData("R1", DATE_1, List.of());
+        givenRunData("R1", List.of());
         Summary expected = summaryOf(FIRST, null);
         when(assembler.assemble(any(), isNull(), any(), any())).thenReturn(expected);
 
@@ -155,30 +154,30 @@ class SummaryServiceTest {
     @Test
     void withoutComparedToRunIdOtherRunsAreNotRead() {
         givenRun(FIRST);
-        givenRunData("R1", DATE_1, List.of());
+        givenRunData("R1", List.of());
 
         service.getSummary(new SummaryQuery("R1", "ROOT"));
 
         verify(runs, never()).findAll();
         verify(runs, never()).findAllWithIssueCounts();
         verify(runs).findById("R1");
-        verify(snapshots).load("R1", DATE_1);
+        verify(snapshots).loadGoals("R1");
     }
 
     @Test
     void baseIsTakenFromComparedToRunIdWithItsOwnData() {
         givenRun(FIRST);
         givenRun(SECOND);
-        Snapshot firstSnapshot = givenRunData("R1", DATE_1, List.of(noParentIssue("G-1", "ROOT")));
-        Snapshot secondSnapshot = givenRunData("R2", DATE_2, List.of(noParentIssue("G-2", "ROOT")));
+        List<GoalRow> firstGoals = givenRunData("R1", List.of(noParentIssue("G-1", "ROOT")));
+        List<GoalRow> secondGoals = givenRunData("R2", List.of(noParentIssue("G-2", "ROOT")));
 
         service.getSummary(new SummaryQuery("R2", "ROOT"));
 
         ArgumentCaptor<RunData> current = ArgumentCaptor.forClass(RunData.class);
         ArgumentCaptor<RunData> base = ArgumentCaptor.forClass(RunData.class);
         verify(assembler).assemble(current.capture(), base.capture(), any(), any());
-        assertThat(current.getValue()).isEqualTo(new RunData(SECOND, secondSnapshot, List.of(noParentIssue("G-2", "ROOT"))));
-        assertThat(base.getValue()).isEqualTo(new RunData(FIRST, firstSnapshot, List.of(noParentIssue("G-1", "ROOT"))));
+        assertThat(current.getValue()).isEqualTo(new RunData(SECOND, secondGoals, List.of(noParentIssue("G-2", "ROOT"))));
+        assertThat(base.getValue()).isEqualTo(new RunData(FIRST, firstGoals, List.of(noParentIssue("G-1", "ROOT"))));
     }
 
     @Test
@@ -189,28 +188,29 @@ class SummaryServiceTest {
         givenRun(closer);
         givenRun(SECOND);
         when(runs.findAll()).thenReturn(List.of(FIRST, closer, SECOND));
-        givenRunData("R1", DATE_1, List.of());
-        givenRunData("R2", DATE_2, List.of());
+        givenRunData("R1", List.of());
+        givenRunData("R2", List.of());
 
         service.getSummary(new SummaryQuery("R2", "ROOT"));
 
         ArgumentCaptor<RunData> base = ArgumentCaptor.forClass(RunData.class);
         verify(assembler).assemble(any(), base.capture(), any(), any());
         assertThat(base.getValue().run()).isEqualTo(FIRST);
-        verify(snapshots, never()).load(eq("R1b"), any());
+        verify(snapshots, never()).loadGoals("R1b");
     }
 
     @Test
-    void snapshotsAreLoadedWithDatesOfTheirRuns() {
+    void goalsOfBothRunsAreReadAndKeyResultsAreNot() {
         givenRun(FIRST);
         givenRun(SECOND);
-        givenRunData("R1", DATE_1, List.of());
-        givenRunData("R2", DATE_2, List.of());
+        givenRunData("R1", List.of());
+        givenRunData("R2", List.of());
 
         service.getSummary(new SummaryQuery("R2", "ROOT"));
 
-        verify(snapshots).load("R2", DATE_2);
-        verify(snapshots).load("R1", DATE_1);
+        verify(snapshots).loadGoals("R2");
+        verify(snapshots).loadGoals("R1");
+        verify(snapshots, never()).load(any(), any());
     }
 
     // Подразделение и дерево
@@ -218,7 +218,7 @@ class SummaryServiceTest {
     @Test
     void unitAndTreeComeFromRepository() {
         givenRun(FIRST);
-        givenRunData("R1", DATE_1, List.of());
+        givenRunData("R1", List.of());
 
         service.getSummary(new SummaryQuery("R1", "ROOT"));
 
@@ -234,8 +234,8 @@ class SummaryServiceTest {
         SummaryService withRealAssembler = new SummaryService(runs, units, snapshots, issues, new SummaryAssembler());
         givenRun(FIRST);
         givenRun(SECOND);
-        givenRunData("R1", DATE_1, List.of(noParentIssue("G-1", "ROOT")));
-        givenRunData("R2", DATE_2, List.of(noParentIssue("G-2", "CHILD"), noParentIssue("G-3", "CHILD")));
+        givenRunData("R1", List.of(noParentIssue("G-1", "ROOT")));
+        givenRunData("R2", List.of(noParentIssue("G-2", "CHILD"), noParentIssue("G-3", "CHILD")));
 
         Summary summary = withRealAssembler.getSummary(new SummaryQuery("R2", "ROOT"));
 
@@ -253,8 +253,8 @@ class SummaryServiceTest {
     void nothingIsWritten() {
         givenRun(FIRST);
         givenRun(SECOND);
-        givenRunData("R1", DATE_1, List.of());
-        givenRunData("R2", DATE_2, List.of());
+        givenRunData("R1", List.of());
+        givenRunData("R2", List.of());
 
         service.getSummary(new SummaryQuery("R2", "ROOT"));
 
@@ -262,25 +262,27 @@ class SummaryServiceTest {
     }
 
     @Test
-    void readsInOneReadOnlyRepeatableReadTransaction() throws Exception {
-        Transactional transactional = SummaryService.class
-                .getMethod("getSummary", SummaryQuery.class)
-                .getAnnotation(Transactional.class);
+    void readsInOneReadOnlyRepeatableReadTransactionOpenedByProxy() {
+        givenRun(FIRST);
+        givenRunData("R1", List.of());
 
-        assertThat(transactional).isNotNull();
-        assertThat(transactional.readOnly()).isTrue();
-        assertThat(transactional.isolation()).isEqualTo(Isolation.REPEATABLE_READ);
+        TransactionDefinition transaction = TransactionProbe.definitionOfCall(
+                SummaryService.class, service, proxy -> proxy.getSummary(new SummaryQuery("R1", "ROOT")));
+
+        assertThat(transaction.isReadOnly()).isTrue();
+        assertThat(transaction.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ);
     }
 
     private void givenRun(Run run) {
         when(runs.findById(run.id())).thenReturn(Optional.of(run));
     }
 
-    private Snapshot givenRunData(String runId, LocalDate date, List<Issue> runIssues) {
-        Snapshot snapshot = new Snapshot(date, List.of(activeGoal("G-" + runId, "ROOT", GoalLevel.DEPARTMENT, null)), List.of());
-        when(snapshots.load(runId, date)).thenReturn(snapshot);
+    /** Сводке нужны только цели снимка: КР не читаются. */
+    private List<GoalRow> givenRunData(String runId, List<Issue> runIssues) {
+        List<GoalRow> goals = List.of(activeGoal("G-" + runId, "ROOT", GoalLevel.DEPARTMENT, null));
+        when(snapshots.loadGoals(runId)).thenReturn(goals);
         when(issues.findByRun(runId)).thenReturn(runIssues);
-        return snapshot;
+        return goals;
     }
 
     private KkdException failure(String runId, String unitId) {

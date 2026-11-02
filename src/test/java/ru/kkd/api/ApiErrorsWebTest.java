@@ -5,18 +5,29 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.HttpHeaders;
@@ -31,6 +42,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.context.request.ServletWebRequest;
@@ -144,12 +156,13 @@ class ApiErrorsWebTest {
 
     // 422: форма параметров. Сервисы не вызываются
 
+    /** Признак ставит Tomcat: на неверную запись %XX и на кусок без имени, например =1. Его ответ проверяет шаг 3 scripts/check-chain.sh. */
     @Test
     void brokenQueryFoundByTomcatIs422() throws Exception {
         assertInvalidParam(
                 perform(get(ISSUES).param("run_id", "RUN-002")
                         .requestAttr("org.apache.catalina.parameter_parse_failed", Boolean.TRUE)),
-                "Строка запроса содержит испорченное кодирование");
+                "Строка запроса содержит испорченное кодирование или параметр без имени");
     }
 
     /** MockMvc обходит Tomcat: видно только значение после него. Ответ самого Tomcat проверяет шаг 3 scripts/check-chain.sh. */
@@ -432,6 +445,92 @@ class ApiErrorsWebTest {
         assertThat(response.getBody()).isEqualTo(ApiErrorResponse.of("INTERNAL_ERROR", INTERNAL_MESSAGE));
     }
 
+    // Испорченная запись %XX в параметре пути: её ловит фильтр до Spring MVC, иначе был бы 500 с HTML. Раздел 8.5
+    // MockMvc собрал бы адрес сам и закодировал %, поэтому сырой адрес ставится в запрос напрямую.
+
+    @ParameterizedTest(name = "{0} {1}")
+    @CsvSource({
+            "GET, /api/runs;x=%zz", "GET, /api/runs;x=%", "GET, /api/runs;x=%2", "GET, /api/runs;%zz",
+            "GET, /api/runs;=%zz", "GET, /api;x=%zz/runs", "GET, /api/kkd/summary;=%zz", "GET, /api/kkd/issues;a=%G0",
+            "POST, /api/runs;x=%zz", "OPTIONS, /api/runs;x=%zz", "GET, /api/nope;x=%zz", "GET, /;x=%zz"})
+    void brokenEncodingInPathParameterIs400(String method, String uri) throws Exception {
+        assertError(perform(request(HttpMethod.valueOf(method), "/").with(rawUri(uri))),
+                400, "REQUEST_NOT_SUPPORTED", "Адрес запроса содержит испорченное кодирование");
+        verifyNoInteractions(summaryService, issueService, runQueryService);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"/api/runs;x=1", "/api/runs;x=%FF", "/api/runs;=ok", "/api/runs;x=%41"})
+    void correctPathParameterIsIgnored(String uri) throws Exception {
+        when(runQueryService.listRuns()).thenReturn(List.of());
+
+        MockHttpServletResponse response = perform(get(RUNS).with(rawUri(uri)));
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(body(response)).isEqualTo("{\"items\":[],\"total\":0}");
+    }
+
+    // Accept, из которого Spring получает больше 50 совместимых типов: без своего обработчика был бы 500. Раздел 8.5
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("acceptsSpringCannotSort")
+    void acceptThatSpringCannotSortIs406WithoutErrorInLog(String accept) throws Exception {
+        when(runQueryService.listRuns()).thenReturn(List.of());
+        when(summaryService.getSummary(any())).thenReturn(summary());
+        ListAppender<ILoggingEvent> log = attachLog();
+
+        try {
+            assertError(perform(get(RUNS).header(HttpHeaders.ACCEPT, accept)),
+                    406, "REQUEST_NOT_SUPPORTED", "Запрос не поддерживается");
+            assertError(perform(get(SUMMARY).param("run_id", "RUN-002").param("unit_id", "HQ-CIB")
+                            .header(HttpHeaders.ACCEPT, accept)),
+                    406, "REQUEST_NOT_SUPPORTED", "Запрос не поддерживается");
+        } finally {
+            detachLog(log);
+        }
+        assertThat(log.list).noneMatch(event -> event.getLevel().isGreaterOrEqual(Level.WARN));
+    }
+
+    static Stream<String> acceptsSpringCannotSort() {
+        return Stream.of(
+                acceptWithQualities(26),
+                IntStream.rangeClosed(1, 50).mapToObj(i -> "application/*;a=" + i).collect(Collectors.joining(",")));
+    }
+
+    @Test
+    void acceptThatSpringCanSortStillGives200() throws Exception {
+        when(runQueryService.listRuns()).thenReturn(List.of());
+
+        assertThat(perform(get(RUNS).header(HttpHeaders.ACCEPT, acceptWithQualities(25))).getStatus()).isEqualTo(200);
+    }
+
+    /** Разные application/*;q=0.001 и далее: каждый даёт два совместимых типа, application/json и себя. */
+    private static String acceptWithQualities(int count) {
+        return IntStream.rangeClosed(1, count)
+                .mapToObj(i -> String.format(Locale.ROOT, "application/*;q=0.%03d", i))
+                .collect(Collectors.joining(","));
+    }
+
+    // Испорченный Origin на неизвестном пути: обработчик статических ресурсов отключён, иначе был бы 403 текстом
+
+    @ParameterizedTest(name = "{0} {1}, Origin: {2}")
+    @CsvSource({
+            "GET, /api/nope, http://a:b", "POST, /api/nope, http://a:b", "DELETE, /api/nope, http://a b",
+            "OPTIONS, /api/nope, http://a:b", "GET, /api/runs/, http://a:b", "GET, /, http://a b",
+            "GET, /favicon.ico, http://a:b"})
+    void brokenOriginOnUnknownPathIs404(String method, String path, String origin) throws Exception {
+        assertError(perform(request(HttpMethod.valueOf(method), path).header(HttpHeaders.ORIGIN, origin)),
+                404, "NOT_FOUND", "Путь не найден");
+    }
+
+    @Test
+    void preflightToUnknownPathIs404() throws Exception {
+        assertError(perform(options("/api/nope")
+                        .header(HttpHeaders.ORIGIN, "http://x.example")
+                        .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")),
+                404, "NOT_FOUND", "Путь не найден");
+    }
+
     // Единый формат и JSON при любом Accept
 
     @ParameterizedTest(name = "Accept: {0}")
@@ -465,6 +564,25 @@ class ApiErrorsWebTest {
 
     private MockHttpServletResponse perform(MockHttpServletRequestBuilder request) throws Exception {
         return mvc.perform(request).andReturn().getResponse();
+    }
+
+    private static RequestPostProcessor rawUri(String uri) {
+        return request -> {
+            request.setRequestURI(uri);
+            return request;
+        };
+    }
+
+    /** Журнал обработчика ошибок: события доходят до ListAppender, подключённого прямо к его логгеру. */
+    private static ListAppender<ILoggingEvent> attachLog() {
+        ListAppender<ILoggingEvent> log = new ListAppender<>();
+        log.start();
+        ((Logger) LoggerFactory.getLogger(ApiExceptionHandler.class)).addAppender(log);
+        return log;
+    }
+
+    private static void detachLog(ListAppender<ILoggingEvent> log) {
+        ((Logger) LoggerFactory.getLogger(ApiExceptionHandler.class)).detachAppender(log);
     }
 
     private void assertInvalidParam(MockHttpServletResponse response, String message) throws Exception {

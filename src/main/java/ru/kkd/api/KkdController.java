@@ -25,9 +25,11 @@ public class KkdController {
     /** Tomcat молча отбрасывает параметр с испорченным кодированием: без этой проверки severity=%zz дал бы весь список. */
     @ModelAttribute
     void rejectBrokenQuery(HttpServletRequest request) {
+        // Тот же признак Tomcat ставит и куску без имени, например =1. Причину он хранит только первую, поэтому
+        // отвергается любая ошибка разбора: иначе в =1&severity=%zz фильтр severity тоже молча пропал бы. Раздел 8.1.
         request.getParameterMap();
         if (request.getAttribute(Globals.PARAMETER_PARSE_FAILED_ATTR) != null) {
-            throw KkdException.invalidParam("Строка запроса содержит испорченное кодирование");
+            throw KkdException.invalidParam("Строка запроса содержит испорченное кодирование или параметр без имени");
         }
     }
 

@@ -7,6 +7,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.InvalidMimeTypeException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
@@ -34,6 +36,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
             return internalError(e, new HttpHeaders());
         }
         return response(status, new HttpHeaders(), e.code(), e.getMessage());
+    }
+
+    /**
+     * Accept, из которого получается больше 50 совместимых типов: Spring не может их отсортировать.
+     * Это ошибка клиента, поэтому ответ тот же 406, что Spring сам даёт на Accept длиннее 50 элементов.
+     */
+    @ExceptionHandler(InvalidMimeTypeException.class)
+    public ResponseEntity<Object> handleUnsortableAccept(InvalidMimeTypeException e, WebRequest request)
+            throws Exception {
+        return handleException(new HttpMediaTypeNotAcceptableException(e.getMessage()), request);
     }
 
     @ExceptionHandler(Exception.class)

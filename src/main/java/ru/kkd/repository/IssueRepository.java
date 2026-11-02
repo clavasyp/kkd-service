@@ -74,14 +74,15 @@ public class IssueRepository {
     }
 
     public int count(IssueFilter filter) {
-        Integer count = namedJdbc.queryForObject(COUNT + whereOf(filter), paramsOf(filter), Integer.class);
-        return count == null ? 0 : count;
+        return namedJdbc.queryForObject(COUNT + whereOf(filter), paramsOf(filter), Integer.class);
     }
 
     private static String whereOf(IssueFilter filter) {
         StringBuilder where = new StringBuilder("WHERE run_id = :run_id\n");
         if (filter.unitIds() != null) {
-            where.append("AND unit_id IN (:unit_ids)\n");
+            // Ветка идёт одним параметром-массивом: IN (:unit_ids) дал бы параметр на каждое подразделение,
+            // а драйвер PostgreSQL принимает не больше 65 535 параметров.
+            where.append("AND unit_id = ANY(CAST(:unit_ids AS text[]))\n");
         }
         if (filter.ruleCode() != null) {
             where.append("AND rule_code = :rule_code\n");
@@ -95,7 +96,8 @@ public class IssueRepository {
     private static MapSqlParameterSource paramsOf(IssueFilter filter) {
         return new MapSqlParameterSource()
                 .addValue("run_id", filter.runId())
-                .addValue("unit_ids", filter.unitIds())
+                // Массив, а не Set: NamedParameterJdbcTemplate разворачивает коллекцию в отдельные параметры.
+                .addValue("unit_ids", filter.unitIds() == null ? null : filter.unitIds().toArray(String[]::new))
                 .addValue("rule_code", filter.ruleCode() == null ? null : filter.ruleCode().name())
                 .addValue("severity", filter.severity() == null ? null : EnumText.format(filter.severity()));
     }

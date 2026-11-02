@@ -218,7 +218,7 @@ class SummaryAssemblerTest {
     void allPreviousRunsFailedLooksLikeFirstRun() {
         Run failed = new Run("RUN-0", DATE_1, RunStatus.FAILED, null, "Прогон упал");
         Run currentRun = new Run("RUN-2", DATE_2, RunStatus.COMPLETED, null, null);
-        RunData current = new RunData(currentRun, RUN_2.snapshot(), RUN_2.issues());
+        RunData current = new RunData(currentRun, RUN_2.goals(), RUN_2.issues());
 
         assertThat(new BaseRunSelector().select(currentRun, List.of(failed, currentRun))).isEmpty();
         Summary summary = assembler.assemble(current, null, DEP, TREE);
@@ -403,8 +403,9 @@ class SummaryAssemblerTest {
     private static RunData completedRun(
             String id, LocalDate date, String comparedToRunId, List<GoalRow> goals, List<KeyResultRow> keyResults) {
         Run run = new Run(id, date, RunStatus.COMPLETED, comparedToRunId, null);
+        // Проблемы считает настоящий движок по полному снимку, а сводке нужны только его цели.
         Snapshot snapshot = new Snapshot(date, goals, keyResults);
-        return new RunData(run, snapshot, RULE_ENGINE.check(snapshot, CATALOG));
+        return new RunData(run, snapshot.goals(), RULE_ENGINE.check(snapshot, CATALOG));
     }
 
     private static MetricComparison share(String value, String previous, String delta, Trend trend) {

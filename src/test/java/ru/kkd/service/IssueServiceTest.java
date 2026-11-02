@@ -21,8 +21,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.TransactionDefinition;
 import ru.kkd.domain.model.Issue;
 import ru.kkd.domain.model.RuleCode;
 import ru.kkd.domain.model.Run;
@@ -66,7 +65,7 @@ class IssueServiceTest {
             when(units.findById(unit.id())).thenReturn(Optional.of(unit));
         }
         when(units.findAll()).thenReturn(List.of(ROOT, CHILD, GRANDCHILD, OTHER));
-        when(snapshots.findGoalTitles(any())).thenReturn(Map.of());
+        when(snapshots.findGoalTitles(any(), any())).thenReturn(Map.of());
         when(issues.findPage(any(), anyInt(), anyInt())).thenReturn(List.of());
     }
 
@@ -191,7 +190,7 @@ class IssueServiceTest {
         Issue noKr = noKrIssue("G-2", "CHILD");
         when(issues.findPage(any(), anyInt(), anyInt())).thenReturn(List.of(noKr, stale));
         when(issues.count(any())).thenReturn(7);
-        when(snapshots.findGoalTitles("R1")).thenReturn(Map.of("G-1", "Первая", "G-2", "Вторая", "G-3", "Третья"));
+        when(snapshots.findGoalTitles("R1", Set.of("G-1", "G-2"))).thenReturn(Map.of("G-1", "Первая", "G-2", "Вторая"));
 
         IssuePage page = service.findIssues(new IssueQuery("R1", null, null, null, 2, 4));
 
@@ -201,6 +200,17 @@ class IssueServiceTest {
                 7,
                 2,
                 4));
+    }
+
+    @Test
+    void titlesAreReadOnlyForGoalsOfThePage() {
+        // Две проблемы одной цели: название нужно один раз, а цели вне страницы не читаются вовсе.
+        when(issues.findPage(any(), anyInt(), anyInt())).thenReturn(List.of(
+                noKrIssue("G-2", "CHILD"), staleIssue("KR-2", "G-2", "CHILD"), staleIssue("KR-5", "G-5", "ROOT")));
+
+        service.findIssues(new IssueQuery("R1", null, null, null, 3, 0));
+
+        verify(snapshots).findGoalTitles("R1", Set.of("G-2", "G-5"));
     }
 
     @Test
@@ -244,14 +254,12 @@ class IssueServiceTest {
     }
 
     @Test
-    void readsInOneReadOnlyRepeatableReadTransaction() throws Exception {
-        Transactional transactional = IssueService.class
-                .getMethod("findIssues", IssueQuery.class)
-                .getAnnotation(Transactional.class);
+    void readsInOneReadOnlyRepeatableReadTransactionOpenedByProxy() {
+        TransactionDefinition transaction = TransactionProbe.definitionOfCall(
+                IssueService.class, service, proxy -> proxy.findIssues(query("R1", "ROOT")));
 
-        assertThat(transactional).isNotNull();
-        assertThat(transactional.readOnly()).isTrue();
-        assertThat(transactional.isolation()).isEqualTo(Isolation.REPEATABLE_READ);
+        assertThat(transaction.isReadOnly()).isTrue();
+        assertThat(transaction.getIsolationLevel()).isEqualTo(TransactionDefinition.ISOLATION_REPEATABLE_READ);
     }
 
     private static IssueQuery query(String runId, String unitId) {

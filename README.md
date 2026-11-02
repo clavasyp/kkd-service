@@ -13,7 +13,7 @@
 
 ## Что нужно
 
-- Docker 23 или новее с Compose v2 или новее: сборка использует BuildKit.
+- Docker 23 или новее с плагинами Buildx и Compose v2 или новее: сборка использует BuildKit. Проверка: `docker buildx version` и `docker compose version`. В Docker Desktop оба плагина есть. В Ubuntu с пакетом `docker.io` плагин Buildx ставится отдельно: `sudo apt install docker-buildx`.
 - Доступ к Docker Hub и Maven Central при первой сборке.
 - Свободные порты 8080 и 15432. Другие порты можно задать в `.env`, образец в `.env.example`.
 - Имя самой папки проекта без кириллицы, иначе `docker compose` не соберёт проект. Родительские папки могут быть любыми.
@@ -38,7 +38,9 @@ docker compose up --build
 
 Поднимаются база, миграции со стартовыми данными и сервис. Файл `.env` не обязателен: без него работают те же значения по умолчанию.
 
-Сервис готов, когда в журнале появилась строка `Прогон RUN-002: проблем ...`. Строка `ERROR:  relation "public.databasechangeloglock" does not exist` от `db` при первом запуске это не сбой: в пустой базе ещё нет служебной таблицы Liquibase.
+При первом запуске сервис готов, когда в журнале появилась строка `Прогон RUN-002: проблем ...`. При повторном запуске на том же томе прогоны уже посчитаны и такой строки нет: сервис готов, когда отвечает проверка ниже. Строка `ERROR:  relation "public.databasechangeloglock" does not exist` от `db` при первом запуске это не сбой: в пустой базе ещё нет служебной таблицы Liquibase.
+
+Предупреждение `Docker Compose requires buildx plugin to be installed` и ошибка `the --mount option requires BuildKit` значат, что нет плагина Buildx: раздел [«Что нужно»](#что-нужно).
 
 Проверить сервис можно из другого терминала:
 
@@ -57,6 +59,8 @@ docker build --target test --progress=plain .
 ```
 
 Тесты идут внутри сборки образа, база и HTTP не нужны. Обязательные сценарии задания: `KrStaleProgressRuleTest` и `KrWeightsSumRuleTest` (два правила на граничных данных), `MetricCalculatorTest` (расчёт метрики), `DeltaCalculatorTest` (расчёт дельты).
+
+Ошибка `unknown flag: --progress` или `Install the buildx component` значит, что нет плагина Buildx: раздел [«Что нужно»](#что-нужно).
 
 Повторный запуск без изменений кода берётся из кэша: в выводе `CACHED`, строк `Tests run` нет. Запустить тесты заново в Git Bash или Linux:
 
@@ -107,6 +111,7 @@ curl -s "$B/api/kkd/issues?run_id=RUN-002&limit=200" | diff before-issues.json -
 Оговорки:
 
 - `docker compose down -v` это сброс базы, а не откат.
+- После отката обычный `docker compose up` или `docker compose up -d app` снова запускает контейнер `migrate`, и он накатывает всё обратно. Это тот же повторный накат, что и `migrate update`.
 - Между откатом и накатом в журнале `db` есть строки `ERROR:  relation "kkd_run" does not exist`, а в журнале `app` строка `База не готова`. Это не сбой: сервис раз в такт ищет прогоны, а таблиц пока нет.
 - Повторный `rollback --tag=v0-empty` без наката завершится ошибкой `Could not find tag`. Это ожидаемо: откатывать уже нечего, а метка ушла вместе с остальным.
 - После правки файлов в `db/changelog` нужна пересборка: `docker compose build migrate`.
@@ -159,9 +164,10 @@ curl -s "http://127.0.0.1:8080/api/kkd/issues?run_id=RUN-002&unit_id=CIB-NORTH&s
 
 | Статус | `code` | Когда |
 |---|---|---|
-| 422 | `INVALID_PARAM` | Нет обязательного параметра, пустое или неверное значение, неизвестный `rule_code` |
+| 422 | `INVALID_PARAM` | Нет обязательного параметра, пустое или неверное значение, неизвестный `rule_code`, испорченная строка запроса: неверная запись `%XX` или параметр без имени, например `=1` |
 | 404 | `RUN_NOT_FOUND`, `UNIT_NOT_FOUND`, `NOT_FOUND` | Неизвестный прогон, подразделение или путь |
 | 405 | `METHOD_NOT_ALLOWED` | `POST`, `PUT`, `PATCH`, `DELETE`, например `POST /api/runs` |
+| 400 | `REQUEST_NOT_SUPPORTED` | Испорченный адрес: неверная запись `%XX` после `;` в пути, например `/api/runs;x=%zz` |
 | Другой клиентский статус Spring MVC, например 406 | `REQUEST_NOT_SUPPORTED` | Прочие неподдерживаемые запросы |
 | 409 | `RUN_FAILED`, `RUN_IN_PROGRESS` | `summary` или `issues` для прогона `failed` или `running` |
 | 503 | `DB_NOT_READY` | База недоступна или таблиц нет: например, между откатом и накатом |

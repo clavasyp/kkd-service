@@ -41,7 +41,7 @@ public class SummaryService {
     public Summary getSummary(SummaryQuery query) {
         Run run = runs.findById(query.runId()).orElseThrow(() -> KkdException.runNotFound(query.runId()));
         Unit unit = units.findById(query.unitId()).orElseThrow(() -> KkdException.unitNotFound(query.unitId()));
-        RunQueryService.requireCompleted(run);
+        CompletedRun.require(run);
 
         return assembler.assemble(load(run), loadBase(run), unit, new UnitTree(units.findAll()));
     }
@@ -55,6 +55,6 @@ public class SummaryService {
     }
 
     private RunData load(Run run) {
-        return new RunData(run, snapshots.load(run.id(), run.snapshotDate()), issues.findByRun(run.id()));
+        return new RunData(run, snapshots.loadGoals(run.id()), issues.findByRun(run.id()));
     }
 }

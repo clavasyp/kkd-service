@@ -1,7 +1,6 @@
 package ru.kkd.service;
 
 import java.util.List;
-import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -61,12 +60,23 @@ public class RunProcessor {
      * прогон остаётся running и берётся снова в следующем такте.
      */
     public void process(Run run) {
-        calculateInTransaction(run).ifPresent(error ->
-                transactions.executeWithoutResult(status -> runs.markFailed(run.id(), error)));
+        Outcome outcome = calculateInTransaction(run);
+        if (outcome.error() == null) {
+            // После фиксации: строка в журнале значит, что результат уже виден в API.
+            log.info("Прогон {}: проблем {}, {}", run.id(), outcome.issueCount(),
+                    outcome.comparedToRunId() == null ? "сравнения нет" : "сравнение с " + outcome.comparedToRunId());
+            return;
+        }
+        transactions.executeWithoutResult(status -> {
+            // Если строку не удалось перевести в failed, такт завершается: иначе он брал бы её снова без паузы.
+            if (!runs.markFailed(run.id(), outcome.error())) {
+                throw new IllegalStateException("Прогон " + run.id() + " уже не в статусе running, failed не записан");
+            }
+        });
     }
 
-    /** Транзакция прогона. Возвращает текст для error, если прогон не удался: он пишется уже после неё. */
-    private Optional<String> calculateInTransaction(Run run) {
+    /** Транзакция прогона. При неудаче возвращает текст для error: он пишется уже после неё. */
+    private Outcome calculateInTransaction(Run run) {
         try {
             return transactions.execute(status -> calculate(run));
         } catch (RuntimeException e) {
@@ -74,18 +84,18 @@ public class RunProcessor {
                 throw e;
             }
             log.error("Прогон {} завершился сбоем", run.id(), e);
-            return Optional.of(GENERAL_ERROR);
+            return Outcome.failed(GENERAL_ERROR);
         }
     }
 
-    private Optional<String> calculate(Run run) {
+    private Outcome calculate(Run run) {
         List<Run> allRuns = runs.findAll();
 
         if (!snapshots.exists(run.id())) {
             if (isBeforeLastCompleted(run, allRuns)) {
                 log.warn("Прогон {}: снимка нет, а дата {} раньше последнего завершённого прогона",
                         run.id(), run.snapshotDate());
-                return Optional.of(SNAPSHOT_TOO_OLD_ERROR);
+                return Outcome.failed(SNAPSHOT_TOO_OLD_ERROR);
             }
             snapshots.freeze(run.id());
         }
@@ -96,15 +106,28 @@ public class RunProcessor {
         String comparedToRunId = baseRunSelector.select(run, allRuns).map(Run::id).orElse(null);
 
         issues.saveAll(run.id(), found);
-        runs.markCompleted(run.id(), comparedToRunId);
-        log.info("Прогон {}: проблем {}, {}", run.id(), found.size(),
-                comparedToRunId == null ? "сравнения нет" : "сравнение с " + comparedToRunId);
-        return Optional.empty();
+        // Строки running уже нет: исключение отменяет транзакцию, и ни снимок, ни проблемы не фиксируются.
+        if (!runs.markCompleted(run.id(), comparedToRunId)) {
+            throw new IllegalStateException("Прогон " + run.id() + " уже не в статусе running, результат не записан");
+        }
+        return Outcome.completed(found.size(), comparedToRunId);
     }
 
     private boolean isBeforeLastCompleted(Run run, List<Run> allRuns) {
         return allRuns.stream()
                 .filter(other -> other.status() == RunStatus.COMPLETED)
                 .anyMatch(completed -> run.snapshotDate().isBefore(completed.snapshotDate()));
+    }
+
+    /** Итог транзакции прогона: текст для error при неудаче, число проблем и база при успехе. */
+    private record Outcome(String error, int issueCount, String comparedToRunId) {
+
+        static Outcome failed(String error) {
+            return new Outcome(error, 0, null);
+        }
+
+        static Outcome completed(int issueCount, String comparedToRunId) {
+            return new Outcome(null, issueCount, comparedToRunId);
+        }
     }
 }

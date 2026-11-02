@@ -3,9 +3,11 @@ package ru.kkd.service;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import ru.kkd.domain.model.Issue;
 import ru.kkd.domain.model.Run;
 import ru.kkd.domain.org.UnitTree;
 import ru.kkd.repository.IssueFilter;
@@ -35,11 +37,14 @@ public class IssueService {
     public IssuePage findIssues(IssueQuery query) {
         Run run = runs.findById(query.runId()).orElseThrow(() -> KkdException.runNotFound(query.runId()));
         Set<String> unitIds = query.unitId() == null ? null : branchOf(query.unitId());
-        RunQueryService.requireCompleted(run);
+        CompletedRun.require(run);
 
         IssueFilter filter = new IssueFilter(run.id(), unitIds, query.ruleCode(), query.severity());
-        Map<String, String> goalTitles = snapshots.findGoalTitles(run.id());
-        List<IssuePage.Item> items = issues.findPage(filter, query.limit(), query.offset()).stream()
+        List<Issue> page = issues.findPage(filter, query.limit(), query.offset());
+        // Названия только целей этой страницы, а не всего снимка.
+        Map<String, String> goalTitles = snapshots.findGoalTitles(
+                run.id(), page.stream().map(Issue::goalId).collect(Collectors.toSet()));
+        List<IssuePage.Item> items = page.stream()
                 .map(issue -> new IssuePage.Item(issue, goalTitles.get(issue.goalId())))
                 .toList();
         return new IssuePage(run.id(), items, issues.count(filter), query.limit(), query.offset());

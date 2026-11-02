@@ -74,12 +74,14 @@ public class RunRepository {
         return jdbc.query(FIND_NEXT_RUNNING, RunRepository::mapRun).stream().findFirst();
     }
 
-    public void markCompleted(String runId, String comparedToRunId) {
-        jdbc.update(MARK_COMPLETED, comparedToRunId, runId);
+    /** false, если строки running с этим id уже нет: записывать результат некуда. */
+    public boolean markCompleted(String runId, String comparedToRunId) {
+        return jdbc.update(MARK_COMPLETED, comparedToRunId, runId) == 1;
     }
 
-    public void markFailed(String runId, String error) {
-        jdbc.update(MARK_FAILED, error, runId);
+    /** false, если строки running с этим id уже нет. */
+    public boolean markFailed(String runId, String error) {
+        return jdbc.update(MARK_FAILED, error, runId) == 1;
     }
 
     /** Новые сверху: snapshot_date DESC, id DESC. */

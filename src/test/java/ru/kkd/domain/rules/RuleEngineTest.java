@@ -138,6 +138,21 @@ class RuleEngineTest {
     }
 
     @Test
+    void objectIdsAreSortedLikeCollateCOfDatabaseEvenOutsideBmp() {
+        // String.compareTo ставит U+1F600 (пара 0xD83D 0xDE00) раньше U+FF21, а COLLATE "C" по байтам UTF-8 позже.
+        String fullwidthA = "KR-" + Character.toString(0xFF21);
+        String emoji = "KR-" + Character.toString(0x1F600);
+        List<GoalRow> goals = List.of(activeGoal("G-1", GoalLevel.DEPARTMENT, null));
+        List<KeyResultRow> keyResults = List.of(
+                keyResult(emoji, "G-1", "50.00", STALE),
+                keyResult(fullwidthA, "G-1", "50.00", STALE));
+
+        List<Issue> issues = check(goals, keyResults, Map.of(RuleCode.KR_STALE_PROGRESS, Severity.MINOR));
+
+        assertThat(issues).extracting(Issue::objectId).containsExactly(fullwidthA, emoji);
+    }
+
+    @Test
     void laterChangesOfSourceCollectionsDoNotAffectSnapshotAndCatalog() {
         List<GoalRow> goals = new ArrayList<>(List.of(
                 activeGoal("G-1", GoalLevel.DEPARTMENT, null),

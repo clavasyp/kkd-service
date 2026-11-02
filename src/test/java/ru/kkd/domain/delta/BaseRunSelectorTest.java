@@ -92,6 +92,31 @@ class BaseRunSelectorTest {
                 .contains(latestDateGreaterId);
     }
 
+    // U+FF21 в UTF-16 это 0xFF21, а U+1F600 это пара 0xD83D 0xDE00: String.compareTo ставит смайлик раньше.
+    // COLLATE "C" сравнивает байты UTF-8, EF BC A1 против F0 9F 98 80, и ставит его позже. Так же идут такт и /api/runs.
+    private static final String FULLWIDTH_A = "RUN-" + Character.toString(0xFF21);
+    private static final String EMOJI = "RUN-" + Character.toString(0x1F600);
+
+    @Test
+    void onSameDateIdsAreComparedLikeCollateCEvenOutsideBmp() {
+        Run fullwidthA = completed(FULLWIDTH_A, "2026-11-02");
+        Run emojiRunning = run(EMOJI, "2026-11-02", RunStatus.RUNNING);
+        Run emoji = completed(EMOJI, "2026-11-02");
+        Run fullwidthARunning = run(FULLWIDTH_A, "2026-11-02", RunStatus.RUNNING);
+
+        assertThat(selector.select(emojiRunning, List.of(fullwidthA, emojiRunning))).contains(fullwidthA);
+        assertThat(selector.select(fullwidthARunning, List.of(emoji, fullwidthARunning))).isEmpty();
+    }
+
+    @Test
+    void laterRunIsComparedWithRunThatIsLastInOrderOfDatabase() {
+        Run fullwidthA = completed(FULLWIDTH_A, "2026-11-02");
+        Run emoji = completed(EMOJI, "2026-11-02");
+        Run later = run("RUN-9", "2026-11-09", RunStatus.RUNNING);
+
+        assertThat(selector.select(later, List.of(emoji, fullwidthA, later))).contains(emoji);
+    }
+
     @Test
     void currentRunIsNotPickedEvenIfCompleted() {
         Run earlier = completed("RUN-1", "2026-10-19");

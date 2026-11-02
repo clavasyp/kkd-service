@@ -628,7 +628,7 @@ reader_holds() { # сколько таблиц держит читатель, с
   [ "$SQL_OUT" = "$1" ]
 }
 
-# Читатель держит таблицы в порядке SummaryService, ждёт, пока откат встанет на блокировку, и читает цель.
+# Читатель держит таблицы в порядке чтения сервиса, kkd_run первой, ждёт, пока откат встанет на блокировку, и читает цель.
 # Без LOCK TABLE kkd_run в откате этого changeset одна из сторон получает deadlock detected.
 rollback_with_reader() { # changeset, цель, таблицы, которые читатель уже держит
   local changeset=$1 target=$2 table='' in_list='' held=0 rollback_code=0 reader_code=0
@@ -1074,6 +1074,11 @@ for value in MINOR blocker ''; do expect_error 422 INVALID_PARAM "$G&severity=$v
 for value in abc '' 0 -1 201 1.0 %2B5 %205 %D9%A5; do expect_error 422 INVALID_PARAM "$G&limit=$value"; done
 for value in abc '' -1 2147483648 1.5 %2B5 %205 %D9%A5; do expect_error 422 INVALID_PARAM "$G&offset=$value"; done
 for query in severity=%zz limit=%zz %zz=1; do expect_error 422 INVALID_PARAM "$G&$query"; done
+# Кусок без имени Tomcat тоже считает ошибкой разбора и запоминает только первую причину: раздел 8.1
+for query in =1 = =minor '=1&severity=%zz'; do expect_error 422 INVALID_PARAM "$G&$query"; done
+expect_error 422 INVALID_PARAM "$SUMMARY?run_id=RUN-002&unit_id=HQ-CIB&=1"
+has 'раздел 8.1: сообщение называет и параметр без имени' 'испорченное кодирование или параметр без имени' "$HTTP_BODY"
+for query in '&' foo=; do expect_ok "$G&$query"; done
 # Символы без кодирования, раздел 8.1: без server.tomcat.relaxed-query-chars Tomcat отвечает 400 с HTML. --globoff: иначе curl разбирает [ и { сам
 for value in '"1"' '<1>' '[1]' '1\2' '1^2' '1`2' '{1}' '1|2'; do expect_error 422 INVALID_PARAM "$G&limit=$value" --globoff; done
 expect_error 422 INVALID_PARAM "$G&severity=a|b" --globoff
@@ -1090,8 +1095,28 @@ done
 expect_error 405 METHOD_NOT_ALLOWED /api/runs -X PUT -H 'Content-Type: application/x-www-form-urlencoded' --data-binary 'a=%zz'
 for path in /api/nope / /error /api/runs/ /api; do expect_error 404 NOT_FOUND "$path"; done
 expect_error 404 NOT_FOUND /api/nope -X POST
+# Испорченный Origin: обработчик статических ресурсов отключён, иначе он проверял Origin и отвечал 403 текстом. Раздел 8.5
+for path in /api/nope / /favicon.ico; do expect_error 404 NOT_FOUND "$path" -H 'Origin: http://a:b'; done
+expect_error 404 NOT_FOUND /api/nope -X DELETE -H 'Origin: http://a b'
+expect_error 404 NOT_FOUND /api/nope -X OPTIONS -H 'Origin: http://example.org' -H 'Access-Control-Request-Method: GET'
+expect_ok /api/runs -H 'Origin: http://a:b'
 expect_error 406 REQUEST_NOT_SUPPORTED /api/runs -H 'Accept: application/xml'
 expect_error 422 INVALID_PARAM "$G&limit=0" -H 'Accept: application/xml'
+# Accept, из которого Spring получает больше 50 совместимых типов: тот же 406, что на 51 элемент. Раздел 8.5
+accept25=''
+for i in $(seq 1 25); do accept25="$accept25${accept25:+,}application/*;q=0.0$(printf '%02d' "$i")"; done
+accept26="$accept25,application/*;q=0.026"
+expect_ok /api/runs -H "Accept: $accept25"
+expect_error 406 REQUEST_NOT_SUPPORTED /api/runs -H "Accept: $accept26"
+expect_error 406 REQUEST_NOT_SUPPORTED "$SUMMARY?run_id=RUN-002&unit_id=HQ-CIB" -H "Accept: $accept26"
+expect_error 406 REQUEST_NOT_SUPPORTED "$G" -H "Accept: $accept26"
+# Неверная запись %XX в параметре пути: Tomcat её не проверяет, без фильтра Spring отвечал 500 с HTML. Раздел 8.5
+for path in '/api/runs;x=%zz' '/api/runs;=%zz' '/api;x=%zz/runs' "$SUMMARY;x=%zz?run_id=RUN-002&unit_id=HQ-CIB" \
+  "$ISSUES;=%zz?run_id=RUN-002" '/api/nope;x=%zz' '/;x=%'; do
+  expect_error 400 REQUEST_NOT_SUPPORTED "$path"
+done
+for method in POST OPTIONS; do expect_error 400 REQUEST_NOT_SUPPORTED '/api/runs;x=%zz' -X "$method"; done
+for path in '/api/runs;x=1' '/api/runs;x=%FF' '/api/runs;=ok'; do expect_ok "$path"; done
 expect_ok /api/runs -H 'Content-Type: multipart/form-data'
 
 save_responses "$T/resp/series"
@@ -1231,9 +1256,22 @@ has 'раздел 6.4: RUN-T2 сравнивается с RUN-T1' '{"id":"RUN-T2
 has 'раздел 6.4: RUN-T3 сравнивается с RUN-T2' '{"id":"RUN-T3","status":"completed","snapshot_date":"2026-11-11","compared_to_run_id":"RUN-T2"' "$HTTP_BODY"
 has 'раздел 6.4: RUN-T4 сравнивается с RUN-T3' '{"id":"RUN-T4","status":"completed","snapshot_date":"2026-11-11","compared_to_run_id":"RUN-T3"' "$HTTP_BODY"
 
+# id вне BMP, раздел 2.2: такт, база сравнения и /api/runs идут по байтам UTF-8, как COLLATE "C".
+# U+1F600 в UTF-16 пара суррогатов, и String.compareTo поставил бы его раньше U+FF21, а база ставит позже
+wide_a="RUN-$(printf '\357\274\241')" # RUN- и U+FF21 в UTF-8, так его пишет JSON
+bs=$(printf '\\')
+emoji="RUN-${bs}uD83D${bs}uDE00" # RUN- и U+1F600: символ вне BMP Jackson пишет в JSON парой escape-последовательностей
+sql "INSERT INTO kkd_run (id, snapshot_date) VALUES (E'RUN-\\U0001F600', '2026-11-11'), (E'RUN-\\uFF21', '2026-11-11')"
+wait_until "$LIMIT_WAIT" 'прогоны U+FF21 и U+1F600 completed' runs_are completed "$wide_a" "$emoji"
+get /api/runs
+has 'раздел 2.2: прогон U+FF21 сравнивается с RUN-T4' '{"id":"'"$wide_a"'","status":"completed","snapshot_date":"2026-11-11","compared_to_run_id":"RUN-T4"' "$HTTP_BODY"
+has 'раздел 2.2: прогон U+1F600 сравнивается с прогоном U+FF21' '{"id":"'"$emoji"'","status":"completed","snapshot_date":"2026-11-11","compared_to_run_id":"'"$wide_a"'"' "$HTTP_BODY"
+
 # Выключенное реализованное правило не считается
 sql "UPDATE kkd_rule SET enabled = false WHERE code = 'GOAL_NO_KR'; INSERT INTO kkd_run (id, snapshot_date) VALUES ('RUN-NOKR', '2026-11-12')"
 wait_until "$LIMIT_WAIT" 'RUN-NOKR completed' runs_are completed RUN-NOKR
+has 'раздел 6.4: RUN-NOKR сравнивается с последним по порядку базы, прогоном U+1F600' \
+  '{"id":"RUN-NOKR","status":"completed","snapshot_date":"2026-11-12","compared_to_run_id":"'"$emoji"'"' "$HTTP_BODY"
 sql "UPDATE kkd_rule SET enabled = true WHERE code = 'GOAL_NO_KR'"
 get "$ISSUES?run_id=RUN-NOKR&rule_code=GOAL_NO_KR"
 has 'выключенное правило не дало строк' '"items":[],"total":0,' "$HTTP_BODY"
@@ -1248,7 +1286,7 @@ get /api/runs
 has 'все правила выключены: issues_total 0' \
   '{"id":"RUN-ZERO","status":"completed","snapshot_date":"2026-11-13","compared_to_run_id":"RUN-NOKR","totals":{"issues_total":0},"error":null}' "$HTTP_BODY"
 eq 'раздел 8.2: порядок snapshot_date DESC, id DESC' "$(ids_of "$HTTP_BODY" | tr '\n' ' ')" \
-  'RUN-ZERO RUN-NOKR RUN-T4 RUN-T3 RUN-T2 RUN-T1 RUN-004 RUN-F RUN-003 RUN-002 RUN-001 RUN-OLD '
+  "RUN-ZERO RUN-NOKR $emoji $wide_a RUN-T4 RUN-T3 RUN-T2 RUN-T1 RUN-004 RUN-F RUN-003 RUN-002 RUN-001 RUN-OLD "
 get "$ISSUES?run_id=RUN-ZERO"
 has 'все правила выключены: пустой список' '"items":[],"total":0,' "$HTTP_BODY"
 
@@ -1276,6 +1314,20 @@ get "$SUMMARY?run_id=$run3&unit_id=HQ-CIB"
 eq "прошлая сводка $run3 не тронута" "$HTTP_BODY" "$(cat "$T/resp/run3-summary.json")"
 get "$ISSUES?run_id=$run3&limit=200"
 eq "прошлый список $run3 не тронут" "$HTTP_BODY" "$(cat "$T/resp/run3-issues.json")"
+
+# Ветка больше предела драйвера PostgreSQL на число параметров, 65 535: она уходит в запрос одним массивом. Раздел 8.4.
+# Строки остаются до сброса базы в шаге 9: у unit.parent_id нет индекса, и удаление 70 000 строк с проверкой FK идёт десятки секунд
+for unit in CIB-NORTH HQ-CIB; do
+  save_one "$T/resp/branch-issues-$unit.json" "$G&unit_id=$unit&limit=200"
+  save_one "$T/resp/branch-summary-$unit.json" "$SUMMARY?run_id=RUN-002&unit_id=$unit"
+done
+sql "INSERT INTO unit (id, name, parent_id) SELECT 'BIG-' || i, 'Big unit', 'CIB-NORTH' FROM generate_series(1, 70000) i"
+for unit in CIB-NORTH HQ-CIB; do
+  get "$G&unit_id=$unit&limit=200"
+  eq "раздел 8.4: 70 000 дочерних у CIB-NORTH, список $unit тот же" "$HTTP_BODY" "$(cat "$T/resp/branch-issues-$unit.json")"
+  get "$SUMMARY?run_id=RUN-002&unit_id=$unit"
+  eq "раздел 8.4: 70 000 дочерних у CIB-NORTH, сводка $unit та же" "$HTTP_BODY" "$(cat "$T/resp/branch-summary-$unit.json")"
+done
 
 # --- Шаг 8 ------------------------------------------------------------------
 

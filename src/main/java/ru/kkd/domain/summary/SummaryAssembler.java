@@ -41,7 +41,7 @@ public class SummaryAssembler {
     }
 
     private MetricValues valuesOf(RunData data, Set<String> branch) {
-        return metricCalculator.calculate(data.snapshot().goals(), data.issues(), branch);
+        return metricCalculator.calculate(data.goals(), data.issues(), branch);
     }
 
     private List<SeverityCount> issuesBySeverity(RunData current, RunData base, Set<String> branch) {
