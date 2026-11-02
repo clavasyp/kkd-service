@@ -27,6 +27,7 @@ JDK и Maven для запуска не нужны: сборка идёт вну
 - Windows 11, Docker 29.2, Compose 5.0: машина автора.
 - Ubuntu 24.04 в GitHub Actions: тесты и сквозная проверка, запуск CI зелёный.
 - Docker 23.0.0, Compose 2.16.0: вложенный демон на машине автора, сборка без сети с заранее заполненным кэшем. Тесты и сквозная проверка прошли.
+- PostgreSQL 15.19 вместо 17.11: команды раздела [«Установка на отдельный стенд»](#установка-на-отдельный-стенд) и сквозная проверка на копии проекта с этим образом базы.
 
 Сколько идёт первая сборка. Замер в CI на чистой машине: `docker build --target test` занял 44 с, после него `docker compose up -d --build` занял 37 с, при этом стадия `build` уже лежала в кэше. Прямого замера `docker compose up --build` с совсем пустым кэшем нет. Оценка, а не замер: около минуты-полутора на чистой машине. Время зависит от сети.
 
@@ -118,6 +119,42 @@ curl -s "$B/api/kkd/issues?run_id=RUN-002&limit=200" | diff before-issues.json -
 - Повторный `rollback --tag=v0-empty` без наката завершится ошибкой `Could not find tag`. Это ожидаемо: откатывать уже нечего, а метка ушла вместе с остальным.
 - После правки файлов в `db/changelog` нужна пересборка: `docker compose build migrate`.
 - Команды `psql` рассчитаны на значения по умолчанию. Если в `.env` заданы другие `POSTGRES_USER` или `POSTGRES_DB`, их нужно подставить.
+
+## Установка на отдельный стенд
+
+`docker compose` поднимает всё на одной машине. На стенд со своей базой PostgreSQL те же образы ставятся по отдельности, а подключение к базе передаётся только переменными окружения. Нужен PostgreSQL 15 или новее и пользователь — владелец базы, права суперпользователя не нужны. Стартовые данные входят в миграции и тоже попадают на стенд.
+
+Команды для Git Bash и Linux. Вместо `<...>` нужно подставить данные стенда. Адрес базы должен быть виден из контейнера: `localhost` внутри контейнера — это сам контейнер. Порт 8080 должен быть свободен: проект из compose перед этим остановить.
+
+```bash
+# Образы: миграции и сервис
+docker build --target migrate -t kkd-migrate .
+docker build --target runtime -t kkd-service .
+
+# Подключение к базе стенда
+DB_URL=jdbc:postgresql://<хост>:<порт>/<база>
+DB_USER=<пользователь>
+DB_PASSWORD=<пароль>
+mig() { docker run --rm -e LIQUIBASE_COMMAND_URL="$DB_URL" -e LIQUIBASE_COMMAND_USERNAME="$DB_USER" -e LIQUIBASE_COMMAND_PASSWORD="$DB_PASSWORD" -e LIQUIBASE_COMMAND_CHANGELOG_FILE=changelog/db.changelog-master.yaml kkd-migrate "$@"; }
+B=http://127.0.0.1:8080
+wait_runs() { for i in $(seq 1 60); do curl -sf --max-time 5 "$B/api/runs" | grep -q '"id":"RUN-002","status":"completed"' && return 0; sleep 1; done; echo "не дождались RUN-002"; return 1; }
+
+# 1. Накат, затем сервис
+mig update
+docker run -d --name kkd-service -p 8080:8080 -e DB_URL="$DB_URL" -e DB_USER="$DB_USER" -e DB_PASSWORD="$DB_PASSWORD" kkd-service
+wait_runs
+
+# 2. Откат: сервис работает и отвечает 503
+mig rollback --tag=v0-empty
+curl -si "$B/api/runs"
+
+# 3. Повторный накат
+mig update
+wait_runs
+curl -s "$B/api/runs"
+```
+
+Убрать сервис: `docker rm -f kkd-service`. Как и в compose, перед откатом команды ждут `completed`: сразу после старта сервис считает прогоны. Что происходит с данными на каждом шаге: [раздел 9.4 `design.md`](specs/design.md#94-что-происходит-с-данными), остальное о стенде: [раздел 9.5](specs/design.md#95-установка-на-отдельный-стенд).
 
 ## API
 
