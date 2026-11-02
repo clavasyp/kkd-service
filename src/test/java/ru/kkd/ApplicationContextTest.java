@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.web.ServerProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -31,6 +32,9 @@ class ApplicationContextTest {
     @Autowired
     private HikariDataSource dataSource;
 
+    @Autowired
+    private ServerProperties server;
+
     @Test
     void contextStartsWithAllBeans() {
         assertThat(controller).isNotNull();
@@ -44,5 +48,12 @@ class ApplicationContextTest {
     @Test
     void multipartParsingIsOff() {
         assertThat(context.getBeanProvider(MultipartResolver.class).getIfAvailable()).isNull();
+    }
+
+    /** Сам ответ Tomcat здесь не виден, нет сокета: его проверяет шаг 3 scripts/check-chain.sh. */
+    @Test
+    void unencodedQueryCharsReachParameterChecks() {
+        assertThat(server.getTomcat().getRelaxedQueryChars())
+                .containsExactlyInAnyOrder('"', '<', '>', '[', '\\', ']', '^', '`', '{', '|', '}');
     }
 }

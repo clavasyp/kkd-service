@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Сквозная проверка: раздел 11.2 specs/design.md. Запуск: bash scripts/check-chain.sh
 # Начинается со сброса базы проекта и при успехе заканчивается им же: docker compose down -v.
-# Контрольных чисел здесь нет: скрипт читает их из таблиц README.
+# Контрольных чисел, названий подразделений и дат прогонов здесь нет: скрипт читает их из таблиц README.
 set -Eeuo pipefail
 
 # Настройки окружения не должны менять папку, файл compose, вывод grep, сборку и разбор текста
@@ -372,7 +372,7 @@ wait_seed_runs() {
 # --- README и карта целей ---------------------------------------------------
 
 readme_bad() { # что не так
-  fail 'формат README' 'таблицы контрольных чисел в прежнем виде' "формат README изменился: $1"
+  fail 'формат README' 'таблицы README в прежнем виде' "формат README изменился: $1"
 }
 
 # Строки таблицы README, ячейки через |. Минус U+2212 становится -, плюс в начале значения убирается
@@ -486,12 +486,36 @@ spec_goals() { # прогон
   ' specs/design.md
 }
 
-unit_name() {
-  case $1 in
-    HQ-CIB) printf 'Департамент корпоративного бизнеса' ;;
-    CIB-NORTH) printf 'Управление корпоративного бизнеса Север' ;;
-    CIB-SOUTH) printf 'Управление корпоративного бизнеса Юг' ;;
-  esac
+table_cell() { # файл таблицы, код в первой колонке, колонка: значение или пусто
+  LC_ALL=C awk -F'|' -v key="$2" -v col="$3" '$1 == key { print $col }' "$1"
+}
+
+unit_name() { # подразделение: название из таблицы README
+  table_cell "$T/units" "$1" 2
+}
+
+run_date() { # прогон: дата снимка из таблицы README
+  table_cell "$T/runs" "$1" 2
+}
+
+run_base_id() { # прогон: значение compared_to_run_id в ответе /api/runs
+  local base
+  base=$(table_cell "$T/runs" "$1" 3)
+  if [ "$base" = нет ]; then
+    printf 'null'
+  else
+    printf '"%s"' "$base"
+  fi
+}
+
+run_compared() { # прогон: значение compared_to в ответе сводки
+  local base
+  base=$(table_cell "$T/runs" "$1" 3)
+  if [ "$base" = нет ]; then
+    printf 'null'
+  else
+    printf '{"id":"%s","snapshot_date":"%s"}' "$base" "$(run_date "$base")"
+  fi
 }
 
 summary_form() { # что проверялось, подразделение, имя, прогон, дата, compared_to, тело
@@ -710,7 +734,19 @@ readme_table '| Ветка | Доля: дельта' 4 "$T/t2"
 readme_table '| Ветка | critical' 7 "$T/t3"
 readme_table '| Фильтр |' 2 "$T/t4"
 readme_table '| Прогон | Дата |' 8 "$T/t5"
+readme_table '| `unit_id` | Название | Родитель |' 3 "$T/units"
+readme_table '| `run_id` | Дата снимка | Сравнивается с |' 3 "$T/runs"
+[ "$(awk 'END { print NR }' "$T/units")" = 3 ] || readme_bad 'в таблице подразделений ожидаются три строки раздела 3'
+[ "$(awk 'END { print NR }' "$T/runs")" = 2 ] || readme_bad 'в таблице прогонов ожидаются две строки раздела 3'
+for run in RUN-001 RUN-002; do
+  [[ $(run_date "$run") =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || readme_bad "в таблице прогонов у $run нет даты вида ГГГГ-ММ-ДД"
+  base=$(table_cell "$T/runs" "$run" 3)
+  [ "$base" = нет ] || [ -n "$(run_date "$base")" ] || readme_bad "в таблице прогонов у $run неизвестная база сравнения $base"
+done
 for unit in $UNITS; do
+  [ -n "$(unit_name "$unit")" ] || readme_bad "в таблице подразделений нет строки $unit"
+  parent=$(table_cell "$T/units" "$unit" 3)
+  [ "$parent" = нет ] || [ -n "$(unit_name "$parent")" ] || readme_bad "в таблице подразделений у $unit неизвестный родитель $parent"
   for run in RUN-001 RUN-002; do
     [ -n "$(t1_value "$unit" "$run" 7)" ] || readme_bad "в таблице показателей нет строки $unit $run"
   done
@@ -761,8 +797,14 @@ sql "SELECT count(*) BETWEEN 20 AND 30 FROM goal"
 eq 'AC-2: целей от 20 до 30' "$SQL_OUT" t
 sql "SELECT count(*) FROM kkd_run WHERE status = 'failed'"
 eq 'AC-2: неуспешных прогонов нет' "$SQL_OUT" 0
-sql "SELECT string_agg(id, ' ' ORDER BY id COLLATE \"C\") FROM unit"
-eq 'AC-2: подразделения раздела 3.1' "$SQL_OUT" 'CIB-NORTH CIB-SOUTH HQ-CIB'
+LC_ALL=C sort "$T/units" > "$T/units-readme.txt"
+sql "SELECT id || '|' || name || '|' || COALESCE(parent_id, 'нет') FROM unit"
+printf '%s\n' "$SQL_OUT" | LC_ALL=C sort > "$T/units-db.txt"
+eq 'AC-2: подразделения в базе как в таблице README: код, название, родитель' "$(cat "$T/units-db.txt")" "$(cat "$T/units-readme.txt")"
+LC_ALL=C sort "$T/runs" > "$T/runs-readme.txt"
+sql "SELECT id || '|' || snapshot_date || '|' || COALESCE(compared_to_run_id, 'нет') FROM kkd_run"
+printf '%s\n' "$SQL_OUT" | LC_ALL=C sort > "$T/runs-db.txt"
+eq 'AC-2: прогоны в базе как в таблице README: код, дата, база сравнения' "$(cat "$T/runs-db.txt")" "$(cat "$T/runs-readme.txt")"
 {
   spec_krs RUN-001 7
   spec_krs RUN-002 8
@@ -793,8 +835,8 @@ issues_run2=$(t1_value HQ-CIB RUN-002 7)
 get /api/runs
 form 'AC-4: форма и порядок /api/runs, totals из README' "$HTTP_BODY" \
   '{"items":[' \
-  '{"id":"RUN-002","status":"completed","snapshot_date":"2026-10-26","compared_to_run_id":"RUN-001","totals":{"issues_total":'"$issues_run2"'},"error":null},' \
-  '{"id":"RUN-001","status":"completed","snapshot_date":"2026-10-19","compared_to_run_id":null,"totals":{"issues_total":'"$issues_run1"'},"error":null}' \
+  '{"id":"RUN-002","status":"completed","snapshot_date":"'"$(run_date RUN-002)"'","compared_to_run_id":'"$(run_base_id RUN-002)"',"totals":{"issues_total":'"$issues_run2"'},"error":null},' \
+  '{"id":"RUN-001","status":"completed","snapshot_date":"'"$(run_date RUN-001)"'","compared_to_run_id":'"$(run_base_id RUN-001)"',"totals":{"issues_total":'"$issues_run1"'},"error":null}' \
   '],"total":2}'
 
 # AC-5, AC-6, AC-7: все строки таблицы показателей
@@ -812,11 +854,9 @@ while IFS='|' read -r unit run active with_issues clean share count cover <&3; d
 
   get "$SUMMARY?run_id=$run&unit_id=$unit"
   summary=$HTTP_BODY
-  case $run in
-    RUN-001) date=2026-10-19 compared=null ;;
-    RUN-002) date=2026-10-26 compared='{"id":"RUN-001","snapshot_date":"2026-10-19"}' ;;
-    *) readme_bad "неизвестный прогон $run" ;;
-  esac
+  date=$(run_date "$run")
+  [ -n "$date" ] || readme_bad "неизвестный прогон $run"
+  compared=$(run_compared "$run")
   summary_form "AC-5: форма сводки $unit $run" "$unit" "$name" "$run" "$date" "$compared" "$summary"
 
   frag "$summary" '"key":"clean_goals_share"'
@@ -1034,6 +1074,11 @@ for value in MINOR blocker ''; do expect_error 422 INVALID_PARAM "$G&severity=$v
 for value in abc '' 0 -1 201 1.0 %2B5 %205 %D9%A5; do expect_error 422 INVALID_PARAM "$G&limit=$value"; done
 for value in abc '' -1 2147483648 1.5 %2B5 %205 %D9%A5; do expect_error 422 INVALID_PARAM "$G&offset=$value"; done
 for query in severity=%zz limit=%zz %zz=1; do expect_error 422 INVALID_PARAM "$G&$query"; done
+# Символы без кодирования, раздел 8.1: без server.tomcat.relaxed-query-chars Tomcat отвечает 400 с HTML. --globoff: иначе curl разбирает [ и { сам
+for value in '"1"' '<1>' '[1]' '1\2' '1^2' '1`2' '{1}' '1|2'; do expect_error 422 INVALID_PARAM "$G&limit=$value" --globoff; done
+expect_error 422 INVALID_PARAM "$G&severity=a|b" --globoff
+expect_error 404 UNIT_NOT_FOUND "$SUMMARY?run_id=RUN-002&unit_id={x}" --globoff
+expect_ok "$G&x=[1]" --globoff
 for query in limit=1 limit=200 offset=0 offset=2147483647 foo=bar; do expect_ok "$G&$query"; done
 expect_ok "$SUMMARY?run_id=RUN-002&unit_id=HQ-CIB&limit=abc"
 
@@ -1211,7 +1256,7 @@ has 'все правила выключены: пустой список' '"item
 sql "INSERT INTO unit (id, name, parent_id) VALUES ('CIB-EMPTY', 'Empty unit', 'HQ-CIB')"
 get "$SUMMARY?run_id=RUN-002&unit_id=CIB-EMPTY"
 summary=$HTTP_BODY
-summary_form 'AC-15: форма сводки, compared_to заполнен' CIB-EMPTY 'Empty unit' RUN-002 2026-10-26 '{"id":"RUN-001","snapshot_date":"2026-10-19"}' "$summary"
+summary_form 'AC-15: форма сводки, compared_to заполнен' CIB-EMPTY 'Empty unit' RUN-002 "$(run_date RUN-002)" "$(run_compared RUN-002)" "$summary"
 frag "$summary" '"key":"clean_goals_share"'
 has 'AC-15: доля null' '"value":null,"previous":null,"delta":null,"trend":null,' "$FRAG"
 frag "$summary" '"key":"cascade_coverage"'

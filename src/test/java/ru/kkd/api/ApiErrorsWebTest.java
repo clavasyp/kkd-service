@@ -152,6 +152,13 @@ class ApiErrorsWebTest {
                 "Строка запроса содержит испорченное кодирование");
     }
 
+    /** MockMvc обходит Tomcat: видно только значение после него. Ответ самого Tomcat проверяет шаг 3 scripts/check-chain.sh. */
+    @Test
+    void bracketsInLimitAre422() throws Exception {
+        assertInvalidParam(perform(get(ISSUES).param("run_id", "RUN-002").param("limit", "[1]")),
+                "Параметр limit должен быть целым числом от 1 до 200");
+    }
+
     @Test
     void summaryWithoutParametersIs422() throws Exception {
         assertInvalidParam(perform(get(SUMMARY)), "Параметр run_id обязателен");
