@@ -7,3 +7,4 @@ before*.json
 # Рабочие материалы кандидата, в решение не входят
 research/
 source/
+CLAUDE.local.md
