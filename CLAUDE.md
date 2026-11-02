@@ -17,9 +17,11 @@
 ```bash
 docker compose up -d --build                             # база, миграции, сервис
 docker build --target test --progress=plain .            # тесты
+docker build --target test --progress=plain --build-arg RERUN=$(date +%s) .  # тесты заново, кэш Maven цел
 docker compose run --rm migrate rollback --tag=v0-empty  # откат всего
 docker compose run --rm migrate update                   # повторный накат
 docker compose down -v                                   # сброс базы, это не откат
+bash scripts/check-chain.sh                              # сквозная проверка, сбрасывает базу в начале и при успехе
 ```
 
 После правки файлов в `db/changelog` нужна пересборка: `docker compose build migrate`.

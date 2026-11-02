@@ -6,9 +6,10 @@
 
 ## Что нужно
 
-- Docker с Compose v2.
+- Docker 23 или новее с Compose v2: сборка использует BuildKit.
 - Доступ к Docker Hub и Maven Central при первой сборке.
 - Свободные порты 8080 и 15432. Другие порты можно задать в `.env`, образец в `.env.example`.
+- Имя самой папки проекта без кириллицы, иначе `docker compose` не соберёт проект. Родительские папки могут быть любыми.
 
 JDK и Maven для запуска не нужны: сборка идёт внутри Docker.
 
@@ -25,7 +26,7 @@ docker compose up --build
 Когда сервис запустится, проверить его можно из другого терминала:
 
 ```bash
-curl http://localhost:8080/api/runs
+curl http://127.0.0.1:8080/api/runs
 ```
 
 В Windows PowerShell 5.1 вместо `curl` нужен `curl.exe`.
@@ -38,6 +39,14 @@ curl http://localhost:8080/api/runs
 docker build --target test --progress=plain .
 ```
 
+Повторный запуск без изменений кода берётся из кэша: в выводе `CACHED`, строк `Tests run` нет. Запустить тесты заново в Git Bash или Linux:
+
+```bash
+docker build --target test --progress=plain --build-arg RERUN=$(date +%s) .
+```
+
+Флаг `--no-cache-filter test` тоже запускает тесты, но сбрасывает кэш Maven, и зависимости скачиваются заново.
+
 ## Накат → откат → повторный накат
 
 Миграции выполняет отдельный контейнер `migrate` с Liquibase. Сервис сам миграции не запускает и не накатывает изменения обратно при перезапуске. Но сразу после старта он считает прогоны, и откат в этот момент может столкнуться с его записью, поэтому перед откатом команды ждут статуса `completed`.
@@ -46,7 +55,8 @@ docker build --target test --progress=plain .
 
 ```bash
 # Порт сервиса. Compose читает .env сам, а оболочка нет: если порт менялся, сначала export APP_PORT=<тот же порт>
-B=http://localhost:${APP_PORT:-8080}
+# Адрес 127.0.0.1, а не localhost: в Windows localhost может уйти на [::1], где порт держит другая программа, и curl зависнет
+B=http://127.0.0.1:${APP_PORT:-8080}
 
 # Ждём, пока сервис посчитает оба прогона: 60 попыток, затем сообщение и код ошибки
 wait_runs() { for i in $(seq 1 60); do curl -sf --max-time 5 "$B/api/runs" | grep -q '"id":"RUN-002","status":"completed"' && return 0; sleep 1; done; echo "не дождались RUN-002"; return 1; }
@@ -74,6 +84,16 @@ docker compose exec -T db psql -U kkd -d kkd -c "\dt"
 - После правки файлов в `db/changelog` нужна пересборка: `docker compose build migrate`.
 - `docker compose down -v` — это сброс базы, а не откат.
 - Команды `psql` рассчитаны на значения по умолчанию. Если в `.env` заданы другие `POSTGRES_USER` или `POSTGRES_DB`, их нужно подставить.
+
+## Сквозная проверка
+
+```bash
+bash scripts/check-chain.sh
+```
+
+Скрипт поднимает проект с нуля и сверяет настоящий запуск со спецификацией: все числа этого README, контракт API, цепочку миграций, третий прогон и граничные случаи.
+
+**Он начинается и при успехе заканчивается сбросом базы проекта: `docker compose down -v`.** При сбое скрипт печатает, что проверялось, ожидание и факт, завершается с кодом не 0, а база остаётся для разбора.
 
 ## Контрольные числа стартовых данных
 
@@ -121,6 +141,24 @@ docker compose exec -T db psql -U kkd -d kkd -c "\dt"
 | `rule_code=CASCADE_NO_PARENT` | 2 |
 | `rule_code=KR_STALE_PROGRESS` | 3 |
 | `rule_code=GOAL_NO_OWNER` (правило выключено) | 0 |
+
+### Проверка третьим прогоном
+
+Откат удаляет прогоны, добавленные руками, поэтому эту проверку выполняют после цепочки, на запущенном проекте. Скрипт из раздела «Сквозная проверка» проект останавливает: после него сначала `docker compose up -d` и `wait_runs`. Адрес `$B` и `wait_runs` заданы в разделе о цепочке.
+
+```bash
+docker compose exec -T db psql -U kkd -d kkd -c "INSERT INTO kkd_run (id, snapshot_date) VALUES ('RUN-003', '2026-11-02')"
+sleep 3   # прогон считается за один такт, до 2 секунд
+curl -s "$B/api/runs"
+curl -s "$B/api/kkd/summary?run_id=RUN-003&unit_id=HQ-CIB"
+curl -s "$B/api/kkd/issues?run_id=RUN-003&rule_code=KR_STALE_PROGRESS"
+```
+
+| Прогон | Дата | `issues_total` | База | `new` | `persisting` | `resolved` | Новая проблема |
+|---|---|---:|---|---:|---:|---:|---|
+| `RUN-003` | 2026-11-02 | 12 | `RUN-002` | 1 | 11 | 0 | `KR_STALE_PROGRESS:KR-03-1` |
+
+Данные никто не менял: факту `KR-03-1` просто стало 52 дня при пороге 45. Если `RUN-003` уже вставлен, для сравнения ответов до и после отката сначала нужен сброс: `docker compose down -v` и `docker compose up -d`. Цепочке выше он не мешает: откат удалит `RUN-003`.
 
 ## Как писалось решение
 
